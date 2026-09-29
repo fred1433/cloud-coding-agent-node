@@ -1,0 +1,96 @@
+{
+  "run_id": "line3-run1",
+  "status": "succeeded",
+  "checks": [
+    {
+      "id": "alerts_json",
+      "what": "alerts.json is valid JSON",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "id": "alert_count",
+      "what": "exactly one sustained shift is reported",
+      "passed": true,
+      "detail": "1 reported"
+    },
+    {
+      "id": "alert_machine",
+      "what": "the shift is on M2 vibration",
+      "passed": true,
+      "detail": "M2 vibration_mm_s"
+    },
+    {
+      "id": "alert_start",
+      "what": "the shift starts at the injected minute",
+      "passed": true,
+      "detail": "reported 2026-09-14T13:11:00Z, injected 2026-09-14T13:11:00Z"
+    },
+    {
+      "id": "no_spike_alert",
+      "what": "the two-minute spike on M1 is not reported",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "id": "counts_M1",
+      "what": "M1: rows, missing and dropped duplicates match",
+      "passed": true,
+      "detail": "got 480/9/11, expected 480/9/11"
+    },
+    {
+      "id": "counts_M2",
+      "what": "M2: rows, missing and dropped duplicates match",
+      "passed": true,
+      "detail": "got 480/16/11, expected 480/16/11"
+    },
+    {
+      "id": "counts_M3",
+      "what": "M3: rows, missing and dropped duplicates match",
+      "passed": true,
+      "detail": "got 480/20/9, expected 480/20/9"
+    },
+    {
+      "id": "normalized_rows",
+      "what": "normalized.csv has one row per machine and minute",
+      "passed": true,
+      "detail": "1440 rows, expected 1440"
+    },
+    {
+      "id": "normalized_missing",
+      "what": "missing minutes are marked missing",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "id": "conflicts_last_wins",
+      "what": "conflicting duplicates keep the last row in file order",
+      "passed": true,
+      "detail": "6 conflicting minutes checked"
+    },
+    {
+      "id": "normalized_sorted",
+      "what": "rows are sorted by machine then ts",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "id": "svg_valid",
+      "what": "vibration.svg is an SVG document",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "id": "svg_inert",
+      "what": "vibration.svg has no scripts, event handlers or external links",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "id": "pipeline_present",
+      "what": "pipeline.py and test_pipeline.py are delivered",
+      "passed": true,
+      "detail": ""
+    }
+  ]
+}

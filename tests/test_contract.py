@@ -1,0 +1,47 @@
+"""Node behaviour a workflow engine relies on (Docker required, no API key)."""
+from conftest import needs_docker
+
+from codenode.models import ScriptedModel
+from codenode.node import TenantContext, run_node
+
+
+def bash(cmd):
+    return {"type": "tool_use", "name": "bash", "input": {"command": cmd}}
+
+
+@needs_docker
+def test_bash_state_persists_between_calls_and_restart_clears_it(runtime):
+    m = ScriptedModel([
+        [bash("mkdir -p sub && cd sub && export FOO=bar && greet() { echo hello-$1; }")],
+        [bash("pwd; echo FOO=$FOO; greet x")],
+        [{"type": "tool_use", "name": "bash", "input": {"restart": True}}],
+        [bash("pwd; echo FOO=$FOO")],
+    ])
+    run = run_node(TenantContext("t"), {"runtime": runtime}, "t", model=m)
+    out = [e["untrusted_output"] for e in run["events"] if e["type"] == "tool.result"]
+    assert "/workspace/sub" in out[1] and "FOO=bar" in out[1] and "hello-x" in out[1]
+    assert "/workspace\n" in out[3] and "FOO=\n" in out[3]
+
+
+@needs_docker
+def test_budget_reservation_stops_before_the_call(runtime):
+    big = {"input_tokens": 200_000, "output_tokens": 8000, "cache_creation_input_tokens": 0,
+           "cache_read_input_tokens": 0}
+    m = ScriptedModel([lambda i: [bash("echo again")]], usage=big)
+    run = run_node(TenantContext("t"), {"runtime": runtime, "limits": {"budget_usd": 1.5, "max_steps": 50}},
+                   "loop forever", model=m)
+    assert run["status"] == "policy_blocked" and "budget" in run["reason"]
+    assert run["ledger"]["cost_usd"] <= 1.5
+    assert m.calls == len(run["ledger"]["requests"])
+
+
+@needs_docker
+def test_terminal_states(runtime):
+    ok = run_node(TenantContext("t"), {"runtime": runtime}, "t", model=ScriptedModel([[bash("true")]]))
+    assert ok["status"] == "succeeded"
+    steps = run_node(TenantContext("t"), {"runtime": runtime, "limits": {"max_steps": 2}}, "t",
+                     model=ScriptedModel([lambda i: [bash("true")]]))
+    assert steps["status"] == "policy_blocked" and "max_steps" in steps["reason"]
+    blocked = run_node(TenantContext("t"), {"runtime": runtime, "limits": {"budget_usd": 9}}, "t",
+                       model=ScriptedModel([]))
+    assert blocked["status"] == "policy_blocked" and "ceiling" in blocked["reason"]

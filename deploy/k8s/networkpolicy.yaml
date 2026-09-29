@@ -1,0 +1,12 @@
+# Default profile: no ingress, no egress at all for sandbox pods. Only enforced if the
+# cluster's network plugin implements NetworkPolicy.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: sandbox-deny-all
+  namespace: codenode-sandboxes
+spec:
+  podSelector:
+    matchLabels:
+      app: codenode-sandbox
+  policyTypes: ["Ingress", "Egress"]

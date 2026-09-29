@@ -1,0 +1,11 @@
+{
+  "as_of": "2026-09-25",
+  "source": "Anthropic model table and prompt-caching multipliers (platform.claude.com/docs pricing), copied on the date above. Re-check before relying on it.",
+  "currency": "USD",
+  "per_million_tokens": {
+    "claude-sonnet-5":   {"input": 2.00, "output": 10.00, "cache_write_5m": 2.50, "cache_write_1h": 4.00, "cache_read": 0.20},
+    "claude-sonnet-5-5": {"input": 2.00, "output": 10.00, "cache_write_5m": 2.50, "cache_write_1h": 4.00, "cache_read": 0.20},
+    "claude-opus-5-5":   {"input": 4.00, "output": 20.00, "cache_write_5m": 5.00, "cache_write_1h": 8.00, "cache_read": 0.20},
+    "claude-haiku-4-5":  {"input": 1.00, "output": 5.00,  "cache_write_5m": 1.25, "cache_write_1h": 2.00, "cache_read": 0.10}
+  }
+}

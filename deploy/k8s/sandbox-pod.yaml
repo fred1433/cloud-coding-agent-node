@@ -1,0 +1,47 @@
+# One pod per run. The controller creates it, execs the two helpers into it, and
+# deletes it; activeDeadlineSeconds is the hard stop if the controller dies.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: codenode-run-example
+  namespace: codenode-sandboxes
+  labels:
+    app: codenode-sandbox
+spec:
+  runtimeClassName: gvisor
+  automountServiceAccountToken: false
+  enableServiceLinks: false
+  restartPolicy: Never
+  activeDeadlineSeconds: 960
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 46298
+    runAsGroup: 46298
+    fsGroup: 46298
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: sandbox
+      image: codenode-sandbox:dev
+      imagePullPolicy: IfNotPresent
+      command: ["python3", "/opt/codenode/init.py", "960"]
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: ["ALL"]
+      resources:
+        limits: {cpu: "1", memory: 768Mi, ephemeral-storage: 64Mi}
+        requests: {cpu: 250m, memory: 256Mi}
+      volumeMounts:
+        - {name: workspace, mountPath: /workspace}
+        - {name: tmp, mountPath: /tmp}
+        - {name: home, mountPath: /home/agent}
+  volumes:
+    # memory-backed emptyDir: counted against the memory limit, not ephemeral-storage
+    - name: workspace
+      emptyDir: {medium: Memory, sizeLimit: 256Mi}
+    - name: tmp
+      emptyDir: {medium: Memory, sizeLimit: 64Mi}
+    - name: home
+      emptyDir: {medium: Memory, sizeLimit: 32Mi}

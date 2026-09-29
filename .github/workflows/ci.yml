@@ -1,0 +1,57 @@
+name: ci
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  docker-runc:
+    name: tests + attack suite (Docker, runc)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: make test
+      - run: make bench RUNTIME=runc
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: bench-runc, path: bench/results-runc.json}
+
+  docker-gvisor:
+    name: attack suite (Docker, gVisor runsc)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - name: install gVisor (runsc) as a Docker runtime
+        run: |
+          curl -fsSL https://gvisor.dev/archive.key | sudo gpg --dearmor -o /usr/share/keyrings/gvisor-archive-keyring.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/gvisor-archive-keyring.gpg] https://storage.googleapis.com/gvisor/releases release main" | sudo tee /etc/apt/sources.list.d/gvisor.list
+          sudo apt-get update -q && sudo apt-get install -y -q runsc
+          sudo runsc install
+          sudo systemctl reload docker || sudo systemctl restart docker
+          docker info --format '{{json .Runtimes}}'
+          runsc --version
+      - run: make test RUNTIME=runsc
+      - run: make bench RUNTIME=runsc
+        if: always()
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: bench-runsc, path: bench/results-runsc.json}
+
+  kubernetes-kind:
+    name: manifests in kind
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - uses: helm/kind-action@v1
+        with: {cluster_name: codenode}
+      - run: make image && kind load docker-image codenode-sandbox:dev --name codenode
+      - run: python deploy/k8s/test_kind.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: k8s-kind, path: bench/k8s-kind.json}

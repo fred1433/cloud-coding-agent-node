@@ -1,0 +1,23 @@
+[project]
+name = "codenode"
+version = "0.1.0"
+description = "A coding-agent node for workflow engines: agent loop on the host, tools in a per-run sandbox."
+requires-python = ">=3.12"
+license = {text = "MIT"}
+dependencies = ["anthropic>=1.9,<2", "jsonschema>=4.23"]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[tool.setuptools]
+packages = ["codenode"]
+
+[tool.setuptools.package-data]
+codenode = ["*.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"

@@ -1,0 +1,39 @@
+# The controller never gets the Docker socket or a cluster-wide credential. It may only
+# create, read, exec into and delete pods in the sandbox namespace. Creating pods in a
+# namespace can grant access to what that namespace holds, so the namespace holds
+# nothing but sandboxes: no secrets, no service accounts with rights.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: codenode-controller
+  namespace: codenode-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: codenode-controller
+  namespace: codenode-sandboxes
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: codenode-controller
+  namespace: codenode-sandboxes
+subjects:
+  - kind: ServiceAccount
+    name: codenode-controller
+    namespace: codenode-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: codenode-controller

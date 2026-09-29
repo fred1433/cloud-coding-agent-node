@@ -1,0 +1,70 @@
+{
+  "window": {
+    "start": "2026-09-14T06:00:00Z",
+    "end": "2026-09-14T13:59:00Z",
+    "rows_per_machine": 480
+  },
+  "machines": {
+    "M1": {
+      "rows": 480,
+      "missing": 9,
+      "duplicates_dropped": 11
+    },
+    "M2": {
+      "rows": 480,
+      "missing": 16,
+      "duplicates_dropped": 11
+    },
+    "M3": {
+      "rows": 480,
+      "missing": 20,
+      "duplicates_dropped": 9
+    }
+  },
+  "alerts": [
+    {
+      "machine": "M2",
+      "signal": "vibration_mm_s",
+      "start_ts": "2026-09-14T13:11:00Z"
+    }
+  ],
+  "conflicts": [
+    {
+      "machine": "M1",
+      "ts": "2026-09-14T09:29:00Z",
+      "keep": "2.193"
+    },
+    {
+      "machine": "M2",
+      "ts": "2026-09-14T13:33:00Z",
+      "keep": "3.532"
+    },
+    {
+      "machine": "M3",
+      "ts": "2026-09-14T09:59:00Z",
+      "keep": "2.551"
+    },
+    {
+      "machine": "M2",
+      "ts": "2026-09-14T11:20:00Z",
+      "keep": "1.971"
+    },
+    {
+      "machine": "M1",
+      "ts": "2026-09-14T09:38:00Z",
+      "keep": "2.061"
+    },
+    {
+      "machine": "M1",
+      "ts": "2026-09-14T09:12:00Z",
+      "keep": "2.088"
+    }
+  ],
+  "not_alerts": [
+    {
+      "machine": "M1",
+      "ts": "2026-09-14T09:25:00Z",
+      "why": "two-minute spike"
+    }
+  ]
+}

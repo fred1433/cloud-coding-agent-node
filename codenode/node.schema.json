@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "codenode/node.schema.json",
+  "title": "Coding agent node configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "model": {"type": "string", "description": "Model id. The CODENODE_MODEL environment variable overrides it."},
+    "provider": {"enum": ["anthropic"], "default": "anthropic"},
+    "effort": {"enum": ["low", "medium", "high", "xhigh", "max"], "default": "medium"},
+    "system_prompt": {"type": "string"},
+    "tools": {
+      "type": "array", "uniqueItems": true,
+      "items": {"enum": ["bash", "editor", "grep", "glob", "fetch_url"]},
+      "default": ["bash", "editor", "grep", "glob"]
+    },
+    "limits": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "max_steps": {"type": "integer", "minimum": 1, "maximum": 200, "default": 30},
+        "budget_usd": {"type": "number", "exclusiveMinimum": 0, "maximum": 50, "default": 1.0},
+        "deadline_s": {"type": "integer", "minimum": 10, "maximum": 7200, "default": 900},
+        "command_timeout_s": {"type": "integer", "minimum": 1, "maximum": 1800, "default": 60},
+        "max_tokens_per_turn": {"type": "integer", "minimum": 256, "maximum": 64000, "default": 8000},
+        "cpus": {"type": "number", "exclusiveMinimum": 0, "maximum": 8, "default": 1},
+        "memory_mb": {"type": "integer", "minimum": 128, "maximum": 16384, "default": 768},
+        "pids": {"type": "integer", "minimum": 16, "maximum": 4096, "default": 128},
+        "workspace_mb": {"type": "integer", "minimum": 8, "maximum": 8192, "default": 256}
+      }
+    },
+    "network": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "mode": {"enum": ["none", "egress_proxy"], "default": "none"},
+        "allow": {"type": "array", "items": {"type": "string", "pattern": "^[a-z0-9.-]+$"}, "default": []}
+      }
+    },
+    "fetch": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "allow_domains": {"type": "array", "items": {"type": "string", "pattern": "^[a-z0-9.-]+$"}, "default": []},
+        "max_bytes": {"type": "integer", "minimum": 1000, "maximum": 5000000, "default": 200000},
+        "require_provenance": {"type": "boolean", "default": true}
+      }
+    },
+    "runtime": {"enum": ["runc", "runsc"], "default": "runc"}
+  }
+}

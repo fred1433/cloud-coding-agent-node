@@ -1,0 +1,8 @@
+# Only meaningful on nodes whose container runtime has a "runsc" handler configured.
+# A pod that names this class on a node without the handler fails to start; it does
+# not fall back to runc.
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata:
+  name: gvisor
+handler: runsc
