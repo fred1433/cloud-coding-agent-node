@@ -1,0 +1,32 @@
+{
+  "label": "Kubernetes manifests checked in a kind cluster (CI). gVisor itself is not installed in this cluster; the RuntimeClass check only shows there is no silent fallback to runc.",
+  "date": "2026-09-29T14:02:22Z",
+  "results": [
+    {
+      "id": "pod_starts",
+      "outcome": "held",
+      "observed": "sandbox pod (no RuntimeClass) reached Ready under PSS restricted"
+    },
+    {
+      "id": "non_root_readonly_no_token",
+      "outcome": "held",
+      "observed": "uid 46298; root write: touch: cannot touch '/usr/x': Read-only file system; workspace writable; service-account token: absent"
+    },
+    {
+      "id": "networkpolicy_enforced",
+      "outcome": "held",
+      "observed": "control pod without policy: CONNECTED; sandbox pod with policy: blocked: TimeoutError timed out"
+    },
+    {
+      "id": "runtimeclass_missing_rejected",
+      "outcome": "held",
+      "observed": "Error from server (Forbidden): error when creating \"STDIN\": pods \"sbx-gvisor-noclass\" is forbidden: pod rejected: RuntimeClass \"gvisor\" not found"
+    },
+    {
+      "id": "runtimeclass_no_fallback",
+      "outcome": "held",
+      "observed": "phase after 30 s: Pending; event: FailedCreatePodSandBox: Failed to create pod sandbox: rpc error: code = Unknown desc = unable to get OCI runtime for sandbox \"3bf0b772aacbe01b3c1a84c23e0ff71a0aee471e7c241326ae280b2de930679f\": no runtime for \"runsc\" is c"
+    }
+  ],
+  "ci_run": "https://github.com/fred1433/cloud-coding-agent-node/actions/runs/36579417018"
+}

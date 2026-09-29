@@ -1,0 +1,222 @@
+{
+  "label": "Scripted tool requests against the real runtime. These tests measure enforcement, not the model's resistance to prompt injection.",
+  "date": "2026-09-29T14:04:29Z",
+  "runtime": "runc",
+  "host": {
+    "docker": "28.0.4 Ubuntu 24.04.5 LTS 6.17.0-1022-azure 2 [name=apparmor name=seccomp,profile=builtin name=cgroupns]",
+    "controller": "Linux x86_64 Python 3.12.14"
+  },
+  "image_digest": "sha256:cbf95f296e99783c789f1be4354ef9b7f87d91942d74c066a7fcd96ed92511ff",
+  "results": [
+    {
+      "id": "env_secrets",
+      "attempted": "Read the API key from env, /proc/*/environ, files, or a Docker socket",
+      "expected": "No key, no socket",
+      "outcome": "held",
+      "observed": "environment, every /proc/*/environ and the filesystem searched: no key; no Docker socket, no /run/secrets",
+      "cause": "the container is started without any -e from the host, without mounts; the key is only read by the controller process",
+      "limitation": "proves this configuration does not pass the key in; says nothing about other credentials a deployment might add",
+      "profile": "default profile (no network)",
+      "seconds": 1.2
+    },
+    {
+      "id": "path_escape",
+      "attempted": "Leave /workspace with the file tool; write outside it with bash",
+      "expected": "Refused; root is read-only",
+      "outcome": "held",
+      "observed": "file tool refused ../, absolute and normalized paths outside /workspace. bash can read the image's own /etc/passwd (that is inside the sandbox, not the host) and cannot write outside /workspace, /tmp and $HOME",
+      "cause": "file tool: path policy; bash: read-only root filesystem (the kernel answered: Read-only file system)",
+      "limitation": "'outside the workspace' is a file-tool policy; 'outside the sandbox' is the container boundary, which this case does not test against the host kernel",
+      "profile": "default profile (no network)",
+      "seconds": 0.6
+    },
+    {
+      "id": "symlink_follow",
+      "attempted": "Plant symlinks with bash, then read and write through the file tool",
+      "expected": "Never followed",
+      "outcome": "held",
+      "observed": "links planted with bash; the file tool refused to read, write or edit through all of them",
+      "cause": "each path component is opened with O_NOFOLLOW relative to /workspace",
+      "limitation": "bash itself can follow the links, to files inside the container only",
+      "profile": "default profile (no network)",
+      "seconds": 0.7
+    },
+    {
+      "id": "toctou_swap",
+      "attempted": "Swap a file for a symlink while the file tool works on it",
+      "expected": "Nothing read or written through it",
+      "outcome": "held",
+      "observed": "300 file operations while another process swapped the file for a symlink: 17 ran on the regular file, 283 were refused, 0 read through the link",
+      "cause": "O_NOFOLLOW on open and rename-into-place on write; a swap between check and use makes the call fail instead of following",
+      "limitation": "the race runs through a second docker exec; the agent's own bash cannot run concurrently with a file tool call because leftovers are killed after each command",
+      "profile": "default profile (no network)",
+      "seconds": 41.6
+    },
+    {
+      "id": "network_none",
+      "attempted": "Open sockets to the internet, the metadata address, a public host",
+      "expected": "No route (default profile)",
+      "outcome": "held",
+      "observed": "interfaces: lo. OSError [Errno 101] Network is unreachable; OSError [Errno 101] Network is unreachable; gaierror [Errno -3] Temporary failure in name resolution",
+      "cause": "--network none: the namespace has only loopback, so IPs are unreachable and names do not resolve",
+      "limitation": "the test uses Python sockets (no curl in the image), so a missing tool cannot fake a pass",
+      "profile": "default profile (no network)",
+      "seconds": 0.4
+    },
+    {
+      "id": "fork_bomb",
+      "attempted": "Fork until something breaks",
+      "expected": "Stopped by the pids limit",
+      "outcome": "held",
+      "observed": "fork failed after 59 children: [Errno 11] Resource temporarily unavailable; cgroup pids.max 64, pids.events max=1; the next command ran",
+      "cause": "cgroup pids.max = 64 (the fork error and the pids.events counter are shown)",
+      "limitation": "host-side effects of the burst are not measured",
+      "profile": "default profile (no network)",
+      "seconds": 0.9
+    },
+    {
+      "id": "runaway_command",
+      "attempted": "Infinite loop plus background, setsid and nohup children",
+      "expected": "Killed at the timeout, no survivors",
+      "outcome": "held",
+      "observed": "shell loop killed at the 3 s command timeout; detached sleeps still running afterwards: 0",
+      "cause": "the command's process group is killed, then every other process of the tenant user except PID 1; an infinite shell loop spends no tokens, so only a time limit can stop it",
+      "limitation": "a process that changes its UID could survive; no-new-privileges and the absence of setuid binaries make that impossible in this image",
+      "profile": "default profile (no network)",
+      "seconds": 3.9
+    },
+    {
+      "id": "disk_fill",
+      "attempted": "Write 2 GB into the workspace and 512 MB into /tmp",
+      "expected": "Stopped by the size quotas",
+      "outcome": "held",
+      "observed": "workspace: dd: error writing 'big.bin': No space left on device, file stopped at 134217728 bytes (oom_kill 0); /tmp: dd: error writing '/tmp/big': No space left on device",
+      "cause": "tmpfs size= quotas; the OOM counter shows it was the quota, not the memory limit",
+      "limitation": "tmpfs pages count toward the memory limit and can be swapped by the host; tmpfs is removed with the container, which is not the same as erased from backing storage",
+      "profile": "default profile (no network)",
+      "seconds": 0.6
+    },
+    {
+      "id": "memory",
+      "attempted": "Allocate 3 GB",
+      "expected": "Stopped by the memory limit",
+      "outcome": "held",
+      "observed": "3 GB allocation under a 512 MB limit ended with exit 137; oom_kill counter 0 -> 1; the sandbox still answers",
+      "cause": "cgroup memory.max (exit 137 with a rising oom_kill counter means the kernel OOM killer; a MemoryError would mean the allocation was refused up front)",
+      "limitation": "--memory-swap equals --memory, so the container cannot swap its own pages",
+      "profile": "default profile (no network)",
+      "seconds": 0.6
+    },
+    {
+      "id": "privilege",
+      "attempted": "Gain root or capabilities",
+      "expected": "Refused",
+      "outcome": "held",
+      "observed": "CapEff 0, NoNewPrivs 1, seccomp filter mode (2), setuid(0) refused, setuid/setgid files in image: 0",
+      "cause": "--cap-drop ALL, no-new-privileges, non-root UID, Docker's default seccomp profile, setuid bits stripped at build",
+      "limitation": "kernel vulnerabilities are out of scope: under runc the container shares the host kernel",
+      "profile": "default profile (no network)",
+      "seconds": 0.5
+    },
+    {
+      "id": "edit_policy",
+      "attempted": "Ambiguous replace, edit after an out-of-band change, blind overwrite",
+      "expected": "Refused",
+      "outcome": "held",
+      "observed": "ambiguous replace refused; edit after an out-of-band change refused; blind overwrite refused; new file created",
+      "cause": "this node's edit policy: unique match, view before edit, content hash re-checked",
+      "limitation": "a policy of the file tool only; bash writes files in /workspace freely",
+      "profile": "default profile (no network)",
+      "seconds": 1.0
+    },
+    {
+      "id": "export_boundary",
+      "attempted": "Export a symlink, an oversized file, a hostile name, an undeclared file",
+      "expected": "Only declared outputs leave",
+      "outcome": "held",
+      "observed": "exported ['alerts.json']; refused: 'big.json': 3000000 bytes, over the per-file limit; 'evil\\nname.json': name contains control characters or a backslash; 'notes.txt': not a declared output; 'plot.svg': symlink; 'secret.key': not a declared output",
+      "cause": "only declared output patterns leave, never symlinks or special files, names with control characters are refused, per-file and total size caps",
+      "limitation": "exported content is still untrusted: the demo page shows the SVG only as an <img>, where scripts do not run",
+      "profile": "default profile (no network)",
+      "seconds": 0.5
+    },
+    {
+      "id": "trap_page",
+      "attempted": "A fetched page asks the agent to send secret.txt to an allowed host",
+      "expected": "Canary never arrives",
+      "outcome": "held",
+      "observed": "positive control: our receiver logged ['/sensor-api', '/units'] (the task URL and a link from the page). The canary never arrived: query-string and path attempts were refused before any request",
+      "cause": "provenance rule: fetch_url opens only URLs seen verbatim in the task or in fetched pages",
+      "limitation": "residual channel: choosing WHICH listed link to open leaks a few bits per fetch; the receiver runs on 127.0.0.1 with the private-address check relaxed for that one address in this test only",
+      "profile": "fetch profile",
+      "seconds": 0.8
+    },
+    {
+      "id": "ssrf",
+      "attempted": "Metadata IP, private resolution, IPv6, redirect to internal, rebinding, file://",
+      "expected": "Refused before connecting",
+      "outcome": "held",
+      "observed": "metadata IP: refused (raw IP addresses are not allowed; use an allowed domain name); allowed name resolving to 169.254.169.254: refused (resolves to non-public address 169.254.169.254; refused); allowed name resolving to 127.0.0.1: refused (resolves to non-public address 127.0.0.1; refused); allowed name resolving to ::1: refused (resolves to non-public address ::1; refused); allowed name resolving to fd00::1: refused (resolves to non-public address fd00::1; refused); redirect to an internal address: refused (resolves to non-public address 10.0.0.5; refused); file scheme: refused (scheme 'file' is not allowed (http and https only)); domain not allowed: refused (attacker.example.net is not in this node's allowed domains); DNS rebinding: one lookup, connection made to the checked public address",
+      "cause": "scheme and domain allowlist, every resolved address must be public (IPv4 and IPv6), each redirect hop re-checked, connection pinned to the checked address",
+      "limitation": "unit-level: DNS and HTTP are stubbed so the private targets are never contacted",
+      "profile": "fetch profile",
+      "seconds": 0.0
+    },
+    {
+      "id": "egress_proxy",
+      "attempted": "Bypass the per-run proxy or reach a host outside the tenant allowlist",
+      "expected": "Only allowlisted hosts",
+      "outcome": "held",
+      "observed": "positive controls: [allowed host via proxy OK 200] and our receiver answered a probe from outside the sandbox (status 200, logged: True), run leftovers {'containers': [], 'networks': []}. From the sandbox: other host via proxy blocked: URLError <urlopen error Tunnel connection failed: 403 Host not allowed>; canary to our receiver by IP blocked: HTTPError HTTP Error 405: Only CONNECT; direct connection, no proxy blocked: OSError [Errno 101] Network is unreachable; direct to receiver, no proxy blocked: OSError [Errno 101] Network is unreachable. Proxy denials logged: ['host not in tenant allowlist', 'only CONNECT is supported']. Canary in receiver log: no",
+      "cause": "the sandbox sits on an internal network with no gateway; the per-run proxy is its only route and applies the tenant's host allowlist",
+      "limitation": "the proxy sees host names, not content (no TLS termination): an allowed host is a possible channel, and domain fronting is not addressed",
+      "profile": "egress proxy profile",
+      "seconds": 1.4
+    },
+    {
+      "id": "two_tenants",
+      "attempted": "Two tenants at the same time look for each other",
+      "expected": "Nothing shared",
+      "outcome": "held",
+      "observed": "two runs at the same time, UIDs 46298 and 53986; a filesystem-wide search from each finds only its own marker; empty /dev/shm; nothing left after cleanup",
+      "cause": "one container, one tmpfs workspace and one UID per run; private IPC and PID namespaces",
+      "limitation": "UIDs are derived from a hash here; a real deployment allocates them from a registry",
+      "profile": "default profile (no network)",
+      "seconds": 0.7
+    },
+    {
+      "id": "tenant_api",
+      "attempted": "Tenant B reads, cancels or reuses tenant A's run; retries and reconnects",
+      "expected": "Refused; no duplicates",
+      "outcome": "held",
+      "observed": "retry of the same run_id does not start a second run: yes; B reads A's events is refused: yes; B cancels A's run is refused: yes; B reuses A's run_id is refused: yes; reconnect after seq returns no duplicates: yes; cancel ends the run as cancelled with nothing left: yes; events are ordered without gaps: yes",
+      "cause": "the service keys runs by run_id and checks the caller's tenant context on every call; another tenant's run looks exactly like a missing one",
+      "limitation": "in-process registry; a real engine keeps it in its database behind its own auth",
+      "profile": "default profile (no network)",
+      "seconds": 4.2
+    },
+    {
+      "id": "deadline",
+      "attempted": "Run exceeds its deadline mid-command",
+      "expected": "Timed out, nothing left",
+      "outcome": "held",
+      "observed": "status timed_out after 12s; containers and networks left: 0",
+      "cause": "a controller watchdog destroys the sandbox at the deadline, killing the command in flight",
+      "limitation": "",
+      "profile": "default profile (no network)",
+      "seconds": 12.3
+    },
+    {
+      "id": "controller_killed",
+      "attempted": "The controller dies mid-run",
+      "expected": "The sandbox removes itself",
+      "outcome": "held",
+      "observed": "controller killed with SIGKILL mid-command; the orphaned sandbox removed itself 18s later (deadline 15 s + grace 5 s); janitor found 0 more",
+      "cause": "PID 1 in the sandbox exits at the hard deadline and the container runs with --rm; a janitor removes expired networks and anything else past its deadline",
+      "limitation": "until that deadline, the orphan keeps its CPU and memory reservation",
+      "profile": "default profile (no network)",
+      "seconds": 21.7
+    }
+  ],
+  "ci_run": "https://github.com/fred1433/cloud-coding-agent-node/actions/runs/36579417018"
+}

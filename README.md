@@ -35,6 +35,7 @@ To run the example task against the real API: `ANTHROPIC_API_KEY=... python exam
 | `codenode/attacks.py` | Scripted tool requests against the real runtime, each with its observed cause |
 | `deploy/k8s/` | Minimal pod-per-run manifests and the kind check run in CI |
 | `runs/` | The recorded run (JSONL, unedited), its exported outputs and acceptance result |
+| `bench/` | Attack-suite results: local Docker, CI runc, CI gVisor, CI kind |
 
 ## Node contract
 
@@ -61,7 +62,11 @@ To run the example task against the real API: `ANTHROPIC_API_KEY=... python exam
   connection policy (public addresses only, IPv4 and IPv6, redirects re-checked, connection pinned to
   the checked address) and opens only URLs that appeared in the task or in fetched pages.
 - **gVisor**: `runtime: runsc` runs the same container under gVisor's application kernel, which narrows
-  the host kernel interface the sandbox can reach. It is not a VM. CI runs the suite under it.
+  the host kernel interface the sandbox can reach. It is not a VM. CI runs the suite under it
+  (`bench/ci-runsc.json`): 17 of 19 cases hold; under the fork burst and the 3 GB allocation the whole
+  sandbox exits instead of refusing the one process, the run ends `failed` and nothing is left behind.
+  An earlier gVisor run also caught the file tool following a symlinked directory; the tool now checks
+  each path component with lstat before opening and fstat after.
 
 ## Cost figures
 
