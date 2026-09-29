@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(Path(__file__).parent))
 
-from acceptance import check  # noqa: E402
+from acceptance import full_check  # noqa: E402
 from make_fixture import main as make_fixture  # noqa: E402
 
 from codenode.models import ScriptedModel  # noqa: E402
@@ -57,19 +57,24 @@ def main():
     csv_bytes = (here / "fixture" / "line3_export.csv").read_bytes()
     runs = ROOT / "runs"
     runs.mkdir(exist_ok=True)
+    expected = json.loads((here / "fixture" / "expected.json").read_text())
+
+    def acceptance(outputs, inputs):     # runs after the sandbox is gone; re-execution in a fresh one
+        return full_check(outputs, expected, csv_bytes)
+
     res = run_node(TenantContext("demo-tenant"), NODE, task, {"line3_export.csv": csv_bytes}, outputs=OUTPUTS,
                    model=scripted() if a.scripted else None, events_path=runs / f"{name}.jsonl",
-                   out_dir=runs / name, run_id=name)
-    expected = json.loads((here / "fixture" / "expected.json").read_text())
-    acc = check(res["outputs"], expected)
+                   out_dir=runs / name, run_id=name, acceptance=acceptance)
+    acc = res["acceptance"]
     (runs / f"{name}.acceptance.json").write_text(json.dumps(
-        {"run_id": name, "status": res["status"], "checks": acc}, indent=2) + "\n")
+        {"run_id": name, "status": res["status"], "outputs_accepted": res["outputs_accepted"], "checks": acc},
+        indent=2) + "\n")
     led = res["ledger"]
     print(f"status {res['status']} {res.get('reason', '')}")
     print(f"requests {len(led['requests'])}, tool calls {led['tool_calls']}, cost estimate ${led['cost_usd']:.4f}")
     for r in acc:
         print(("PASS " if r["passed"] else "FAIL ") + r["what"] + (f"  ({r['detail']})" if r["detail"] else ""))
-    return 0 if res["status"] == "succeeded" and all(r["passed"] for r in acc) else 1
+    return 0 if res["status"] == "succeeded" and res["outputs_accepted"] else 1
 
 
 if __name__ == "__main__":

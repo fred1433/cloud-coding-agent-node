@@ -45,9 +45,14 @@ class SandboxError(RuntimeError):
     pass
 
 
+class SandboxFault(SandboxError):
+    """The trusted helper inside the sandbox failed: the run must fail closed."""
+
+
 class Sandbox:
-    def __init__(self, tenant, limits, network=None, runtime="runc", image=IMAGE, run_id=None):
+    def __init__(self, tenant, limits, network=None, runtime="runc", image=IMAGE, run_id=None, extra_args=()):
         self.tenant = tenant
+        self.extra_args = list(extra_args)   # tests only (e.g. the deliberate-sharing control)
         self.uid = tenant_uid(tenant)
         self.limits = limits
         self.network = network or {"mode": "none"}
@@ -83,6 +88,7 @@ class Sandbox:
         ]
         if self.runtime != "runc":
             args += ["--runtime", self.runtime]
+        args += self.extra_args
         if self.network["mode"] == "none":
             args += ["--network", "none"]
         else:
@@ -159,27 +165,34 @@ class Sandbox:
 
     # ---------------------------------------------------------------- execution
     def _helper(self, script, payload, timeout):
-        p = _docker("exec", "-i", "-u", f"{self.uid}:{self.uid}", "-w", "/workspace", self.name,
-                    *HELPER_PY, f"/opt/codenode/{script}",
-                    input=json.dumps(payload).encode(), timeout=timeout, check=False)
+        """Run a trusted helper. Any abnormal end (killed, non-zero exit, no valid JSON reply,
+        host-side timeout) is a sandbox-execution failure, not a tool error: the process state
+        inside the sandbox is no longer known, so the caller must end the run and destroy it."""
         try:
-            return json.loads(p.stdout)
+            p = _docker("exec", "-i", "-u", f"{self.uid}:{self.uid}", "-w", "/workspace", self.name,
+                        *HELPER_PY, f"/opt/codenode/{script}",
+                        input=json.dumps(payload).encode(), timeout=timeout, check=False)
+        except subprocess.TimeoutExpired:
+            raise SandboxFault(f"{script} did not answer within the host-side timeout of {timeout}s") from None
+        if p.returncode != 0:
+            raise SandboxFault(f"{script} ended abnormally (exit {p.returncode}): {clean(p.stderr or p.stdout, 400)}")
+        try:
+            reply = json.loads(p.stdout)
         except ValueError:
-            return {"ok": False, "error": f"sandbox helper failed (exit {p.returncode}): "
-                                          f"{clean(p.stderr or p.stdout, 500)}"}
+            raise SandboxFault(f"{script} returned no valid reply: {clean(p.stdout, 200)}") from None
+        if not isinstance(reply, dict):
+            raise SandboxFault(f"{script} returned an invalid reply")
+        return reply
 
     def fs(self, op, **kw):
         return self._helper("fsops.py", {"op": op, **kw}, timeout=60)
 
     def bash(self, command, timeout=None, max_output=64_000):
         t = timeout or self.limits["command_timeout_s"]
-        try:
-            res = self._helper("runcmd.py", {"command": command, "timeout": t, "max_output": max_output},
-                               timeout=t + 20)
-        except subprocess.TimeoutExpired:
-            return {"exit_code": None, "timed_out": True, "output": "", "note": "host-side timeout"}
-        if "output_b64" not in res:
-            return {"exit_code": None, "timed_out": False, "output": res.get("error", "sandbox error")}
+        res = self._helper("runcmd.py", {"command": command, "timeout": t, "max_output": max_output},
+                           timeout=t + 20)
+        if "output_b64" not in res or "exit_code" not in res:
+            raise SandboxFault("runcmd.py returned an incomplete reply")
         res["output"] = clean(base64.b64decode(res.pop("output_b64")))
         return res
 

@@ -73,3 +73,65 @@ def test_run_ids_are_per_tenant(runtime):
         raise AssertionError("tenant c saw a run")
     except RunNotFound:
         pass
+
+
+@needs_docker
+def test_reexecution_in_a_fresh_sandbox_catches_code_that_does_not_produce_the_outputs(runtime):
+    from pathlib import Path
+    from acceptance import reexecute
+    from reference_line3 import solve
+    root = Path(__file__).resolve().parents[1]
+    src = (root / "examples" / "line3" / "fixture" / "line3_export.csv").read_bytes()
+    prog = (root / "tests" / "reference_line3.py").read_text() + (
+        "\nimport sys\nfor k, v in solve(open(sys.argv[1], 'rb').read()).items():\n"
+        "    open(k, 'wb').write(v) if k.endswith(('.json', '.csv', '.svg')) else None\n")
+    files = {k: v for k, v in solve(src).items() if not k.endswith(".py")}
+    files["pipeline.py"] = prog.encode()
+    files["test_pipeline.py"] = b"def test_ok():\n    assert True\n"
+    good = {r["id"]: r["passed"] for r in reexecute(files, src, runtime)}
+    assert good == {"rerun_reproduces": True, "own_tests_pass": True}
+    bad = {r["id"]: r["passed"] for r in reexecute(dict(files, **{"pipeline.py": b"print(1)\n"}), src, runtime)}
+    assert bad["rerun_reproduces"] is False
+
+
+@needs_docker
+def test_exactly_one_terminal_event_when_startup_fails(runtime, monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    run = run_node(TenantContext("t"), {"runtime": runtime}, "t")      # no model given, no key on the host
+    fins = [e for e in run["events"] if e["type"] == "run.finished"]
+    assert len(fins) == 1 and fins[0]["status"] == "failed" and "ANTHROPIC_API_KEY" in fins[0]["reason"]
+
+
+@needs_docker
+def test_exactly_one_terminal_event_when_writing_outputs_fails(runtime, tmp_path):
+    blocker = tmp_path / "out"
+    blocker.write_text("a file where the output directory should be")
+    m = ScriptedModel([[bash("echo x > r.txt")]])
+    run = run_node(TenantContext("t"), {"runtime": runtime}, "t", outputs=["*.txt"], model=m, out_dir=blocker)
+    fins = [e for e in run["events"] if e["type"] == "run.finished"]
+    assert len(fins) == 1 and fins[0]["status"] == "failed" and "writing outputs failed" in fins[0]["reason"]
+
+
+@needs_docker
+def test_nonzero_exit_is_a_counted_tool_error(runtime):
+    m = ScriptedModel([[bash("exit 7")]])
+    run = run_node(TenantContext("t"), {"runtime": runtime}, "t", model=m)
+    res = [e for e in run["events"] if e["type"] == "tool.result"][0]
+    assert res["is_error"] is True and "[exit code 7]" in res["untrusted_output"]
+    assert run["ledger"]["tool_errors"] == 1 and run["status"] == "succeeded"
+
+
+@needs_docker
+def test_diff_applies_with_git(runtime, tmp_path):
+    import subprocess
+    m = ScriptedModel([[bash("printf 'no newline' > a.txt; printf 'x\\ny' > b.txt; echo ok > c.txt")]])
+    run = run_node(TenantContext("t"), {"runtime": runtime}, "t", {"b.txt": "x\n"}, outputs=["*.txt"], model=m)
+    repo = tmp_path / "r"
+    repo.mkdir()
+    (repo / "b.txt").write_text("x\n")
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    (repo / "p.diff").write_text(run["diff"])
+    chk = subprocess.run(["git", "apply", "--check", "p.diff"], cwd=repo, capture_output=True, text=True)
+    assert chk.returncode == 0, chk.stderr
+    subprocess.run(["git", "apply", "p.diff"], cwd=repo, check=True)
+    assert (repo / "a.txt").read_bytes() == b"no newline" and (repo / "b.txt").read_bytes() == b"x\ny"

@@ -26,7 +26,7 @@ from pathlib import Path
 from . import config as config_mod
 from .models import AnthropicModel
 from .pricing import PriceTable
-from .sandbox import IMAGE, Sandbox
+from .sandbox import IMAGE, Sandbox, SandboxFault
 from .text import excerpt
 from .tools import ToolRunner, anthropic_tools
 from .webfetch import WebFetcher
@@ -49,7 +49,9 @@ DEFAULT_POLICY = {
                    "max_tokens_per_turn": 16000, "cpus": 2, "memory_mb": 2048, "pids": 256,
                    "workspace_mb": 1024},
     "network_modes": ["none"],
+    "egress_hosts": [],                 # hosts a node may allow through the egress proxy
     "fetch_domains": [],
+    "may_disable_provenance": False,    # whether a node may turn off fetch_url's provenance rule
     "runtimes": ["runc", "runsc"],
 }
 
@@ -76,11 +78,14 @@ class Recorder:
         with self.lock:
             ev = {"seq": len(self.events), "t": round(time.monotonic() - self.t0, 3), "type": type_, **data}
             self.events.append(ev)
-            if self.fh:
-                self.fh.write(json.dumps(ev, ensure_ascii=False, default=str) + "\n")
-                self.fh.flush()
-            if self.on_event:
-                self.on_event(ev)
+            try:        # a broken sink never loses the event from memory nor stops the run
+                if self.fh:
+                    self.fh.write(json.dumps(ev, ensure_ascii=False, default=str) + "\n")
+                    self.fh.flush()
+                if self.on_event:
+                    self.on_event(ev)
+            except Exception as e:  # noqa: BLE001
+                self.sink_error = f"{type(e).__name__}: {e}"
             return ev
 
     def since(self, seq):
@@ -106,6 +111,7 @@ def reservation_tokens(system, tools, messages):
 
 
 def policy_violations(cfg, ctx):
+    """The tenant policy (server side) sets what is permitted; a node config can only narrow it."""
     pol, out = ctx.policy, []
     for k, v in cfg["limits"].items():
         cap = pol["max_limits"].get(k)
@@ -113,9 +119,14 @@ def policy_violations(cfg, ctx):
             out.append(f"limits.{k}={v} is above the tenant ceiling {cap}")
     if cfg["network"]["mode"] not in pol["network_modes"]:
         out.append(f"network mode {cfg['network']['mode']!r} is not allowed for this tenant")
+    for h in cfg["network"]["allow"]:
+        if h not in pol.get("egress_hosts", []):
+            out.append(f"egress host {h!r} is not allowed for this tenant")
     for d in cfg["fetch"]["allow_domains"]:
         if d not in pol["fetch_domains"]:
             out.append(f"fetch domain {d!r} is not allowed for this tenant")
+    if not cfg["fetch"]["require_provenance"] and not pol.get("may_disable_provenance", False):
+        out.append("disabling fetch provenance is not allowed for this tenant")
     if cfg["runtime"] not in pol["runtimes"]:
         out.append(f"runtime {cfg['runtime']!r} is not allowed for this tenant")
     return out
@@ -146,9 +157,11 @@ def _diff(before, after):
         except UnicodeDecodeError:
             out.append(f"Binary file {path} changed\n")
             continue
-        out.extend(difflib.unified_diff(at.splitlines(True), bt.splitlines(True),
-                                        f"a/{path}" if a is not None else "/dev/null",
-                                        f"b/{path}" if b is not None else "/dev/null"))
+        for line in difflib.unified_diff(at.splitlines(True), bt.splitlines(True),
+                                         f"a/{path}" if a is not None else "/dev/null",
+                                         f"b/{path}" if b is not None else "/dev/null"):
+            # a file without a final newline must be marked, or the next header runs into it
+            out.append(line if line.endswith("\n") else line + "\n\\ No newline at end of file\n")
     return "".join(out)
 
 
@@ -159,9 +172,19 @@ def _safe_dest(root, rel):
     return dest
 
 
+class _Blocked(Exception):
+    pass
+
+
 def run_node(ctx, node_config, task, files=None, outputs=("*",), model=None, run_id=None,
              events_path=None, on_event=None, out_dir=None, cancel=None, sandbox_cls=Sandbox,
-             fetch_kwargs=None, recorder=None):
+             fetch_kwargs=None, recorder=None, acceptance=None):
+    """Run the node once. Exactly one `run.finished` event is emitted, whatever fails
+    (config, policy, model setup, sandbox, cleanup, output writing).
+
+    `status` says whether EXECUTION completed. When an `acceptance` callable is given
+    (outputs, inputs -> list of checks), it runs after the sandbox is gone and sets
+    `outputs_accepted`; only accepted outputs should feed a consequential next node."""
     run_id = run_id or uuid.uuid4().hex[:12]
     rec = recorder or Recorder(events_path, on_event)
     cancel = cancel or threading.Event()
@@ -173,62 +196,46 @@ def run_node(ctx, node_config, task, files=None, outputs=("*",), model=None, run
               "cost_usd": 0.0, "tool_calls": 0, "tool_errors": 0}
     status, reason, summary = "failed", "", ""
     exported, refused_outputs, changed = {}, [], []
-
-    def finish():
-        diff = _diff({p: files[p] for p in changed if p in files}, {p: exported[p] for p in changed if p in exported})
-        manifest = [{"path": p, "bytes": len(b), "sha256": hashlib.sha256(b).hexdigest()}
-                    for p, b in sorted(exported.items())]
-        if out_dir:
-            od = Path(out_dir)
-            od.mkdir(parents=True, exist_ok=True)
-            for p, b in exported.items():
-                d = _safe_dest(od, p)
-                d.parent.mkdir(parents=True, exist_ok=True)
-                d.write_bytes(b)
-            (od / "changes.diff").write_text(diff)
-        return diff, manifest
-
-    try:
-        cfg = config_mod.load(node_config)
-    except Exception as e:  # noqa: BLE001 - schema violations are a policy decision, reported as such
-        rec.emit("run.finished", source="controller", run_id=run_id, status="policy_blocked",
-                 reason=f"invalid node config: {str(e).splitlines()[0][:300]}")
-        rec.close()
-        return {"run_id": run_id, "status": "policy_blocked", "events": rec.events}
-    L = cfg["limits"]
-    rec.emit("run.started", source="controller", run_id=run_id, tenant=ctx.tenant, model_requested=cfg["model"],
-             runtime=cfg["runtime"], tools=[t.get("name") for t in anthropic_tools(cfg["tools"])], limits=L,
-             network=cfg["network"], outputs=list(outputs), prices_as_of=prices.as_of, task=task,
-             date=dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-             sdk_version=_sdk_version(), image=IMAGE, image_digest=_image_digest(IMAGE),
-             input_files=[{"path": p, "bytes": len(b), "sha256": hashlib.sha256(b).hexdigest()}
-                          for p, b in sorted(files.items())])
-    bad = policy_violations(cfg, ctx)
-    if bad:
-        rec.emit("run.finished", source="controller", run_id=run_id, status="policy_blocked", reason="; ".join(bad))
-        rec.close()
-        return {"run_id": run_id, "status": "policy_blocked", "reason": "; ".join(bad), "events": rec.events}
-
-    model = model or AnthropicModel(cfg["model"], effort=cfg["effort"])
-    tools = anthropic_tools(cfg["tools"])
-    system = cfg.get("system_prompt") or SYSTEM
-    sb = sandbox_cls(tenant=ctx.tenant, limits=L, network=cfg["network"], runtime=cfg["runtime"], run_id=run_id)
-    deadline = time.monotonic() + L["deadline_s"]
+    sb, cfg, L = None, None, {}
     stop = threading.Event()        # set when the run must end now (deadline or cancel)
     why = {}
 
-    def watchdog():
-        while not stop.is_set():
-            if time.monotonic() > deadline or cancel.is_set():
-                why["cause"] = "cancelled" if cancel.is_set() else "timed_out"
-                stop.set()
-                rec.emit("run.stopping", source="controller", cause=why["cause"],
-                         note="destroying the sandbox now; any command in flight is killed with it")
-                sb.destroy()
-                return
-            time.sleep(0.2)
-
     try:
+        try:
+            cfg = config_mod.load(node_config)
+        except Exception as e:  # noqa: BLE001 - schema violations are a policy decision
+            raise _Blocked(f"invalid node config: {str(e).splitlines()[0][:300]}") from e
+        L = cfg["limits"]
+        rec.emit("run.started", source="controller", run_id=run_id, tenant=ctx.tenant,
+                 model_requested=cfg["model"], runtime=cfg["runtime"],
+                 tools=[t.get("name") for t in anthropic_tools(cfg["tools"])], limits=L,
+                 network=cfg["network"], outputs=list(outputs), prices_as_of=prices.as_of, task=task,
+                 date=dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                 sdk_version=_sdk_version(), image=IMAGE, image_digest=_image_digest(IMAGE),
+                 input_files=[{"path": p, "bytes": len(b), "sha256": hashlib.sha256(b).hexdigest()}
+                              for p, b in sorted(files.items())])
+        bad = policy_violations(cfg, ctx)
+        if bad:
+            raise _Blocked("; ".join(bad))
+
+        model = model or AnthropicModel(cfg["model"], effort=cfg["effort"])
+        tools = anthropic_tools(cfg["tools"])
+        system = cfg.get("system_prompt") or SYSTEM
+        sb = sandbox_cls(tenant=ctx.tenant, limits=L, network=cfg["network"], runtime=cfg["runtime"],
+                         run_id=run_id)
+        deadline = time.monotonic() + L["deadline_s"]
+
+        def watchdog():
+            while not stop.is_set():
+                if time.monotonic() > deadline or cancel.is_set():
+                    why["cause"] = "cancelled" if cancel.is_set() else "timed_out"
+                    stop.set()
+                    rec.emit("run.stopping", source="controller", cause=why["cause"],
+                             note="destroying the sandbox now; any command in flight is killed with it")
+                    sb.destroy()
+                    return
+                time.sleep(0.2)
+
         sb.start()
         rec.emit("sandbox.started", source="controller", container=sb.name, uid=sb.uid,
                  docker_args=sb.docker_run_args()[1:])
@@ -267,10 +274,11 @@ def run_node(ctx, node_config, task, files=None, outputs=("*",), model=None, run
                     break
                 except Exception as e:  # noqa: BLE001
                     ledger["api_errors"] += 1
-                    retryable = getattr(e, "status_code", 500) in (408, 409, 429) or \
-                        getattr(e, "status_code", 500) >= 500
+                    code = getattr(e, "status_code", None)
+                    retryable = code is None and "Connection" in type(e).__name__ or \
+                        code in (408, 409, 429) or (code or 0) >= 500
                     rec.emit("model.error", source="controller", step=step, attempt=attempt + 1,
-                             error=f"{type(e).__name__}: {str(e)[:300]}", retryable=retryable,
+                             error=f"{type(e).__name__}: {str(e)[:300]}", retryable=bool(retryable),
                              note="failed attempts are recorded; errored requests are normally not billed")
                     if not retryable or attempt == 2 or stop.is_set():
                         raise RuntimeError(f"model request failed: {type(e).__name__}: {str(e)[:300]}") from e
@@ -304,7 +312,7 @@ def run_node(ctx, node_config, task, files=None, outputs=("*",), model=None, run
                 rec.emit("tool.call", source="controller", step=step, id=c["id"], name=c["name"],
                          input=c.get("input", {}))
                 t = time.monotonic()
-                out, is_err = runner.run(c["name"], c.get("input", {}))
+                out, is_err = runner.run(c["name"], c.get("input", {}))   # SandboxFault propagates: fail closed
                 ledger["tool_calls"] += 1
                 ledger["tool_errors"] += bool(is_err)
                 rec.emit("tool.result", source="sandbox" if c["name"] != "fetch_url" else "web", step=step,
@@ -326,20 +334,63 @@ def run_node(ctx, node_config, task, files=None, outputs=("*",), model=None, run
             if cfg["network"]["mode"] == "egress_proxy":
                 for entry in sb.egress_log():
                     rec.emit("egress.log", source="controller", **entry)
+    except _Blocked as e:
+        status, reason = "policy_blocked", str(e)
+    except SandboxFault as e:
+        if not stop.is_set():
+            status, reason = "failed", f"sandbox execution failure, run failed closed: {e}"[:500]
+            rec.emit("sandbox.fault", source="controller", error=str(e)[:500],
+                     note="the trusted helper ended abnormally; the sandbox is destroyed, nothing is exported")
+            exported, changed = {}, []
     except Exception as e:  # noqa: BLE001 - the node always reports and cleans up
         if not stop.is_set():
             status, reason = "failed", f"{type(e).__name__}: {e}"[:500]
     finally:
-        if stop.is_set():
+        if stop.is_set() and why:
             status = why.get("cause", "timed_out")
             reason = "cancelled by the caller" if status == "cancelled" else f"deadline of {L['deadline_s']}s reached"
             exported, changed = {}, []
         stop.set()
-        leftovers = sb.destroy()
-        diff, manifest = finish()
+        problems = []
+        leftovers = {"containers": [], "networks": []}
+        if sb is not None:
+            try:
+                leftovers = sb.destroy()
+            except Exception as e:  # noqa: BLE001
+                problems.append(f"cleanup failed: {type(e).__name__}: {e}"[:300])
+        diff, manifest = "", []
+        try:
+            diff = _diff({p: files[p] for p in changed if p in files},
+                         {p: exported[p] for p in changed if p in exported})
+            manifest = [{"path": p, "bytes": len(b), "sha256": hashlib.sha256(b).hexdigest()}
+                        for p, b in sorted(exported.items())]
+            if out_dir:
+                od = Path(out_dir)
+                od.mkdir(parents=True, exist_ok=True)
+                for p, b in exported.items():
+                    d = _safe_dest(od, p)
+                    d.parent.mkdir(parents=True, exist_ok=True)
+                    d.write_bytes(b)
+                (od / "changes.diff").write_text(diff)
+        except Exception as e:  # noqa: BLE001
+            problems.append(f"writing outputs failed: {type(e).__name__}: {e}"[:300])
+        accepted, checks = None, []
+        if acceptance is not None and status == "succeeded":
+            try:
+                checks = acceptance(dict(exported), dict(files))
+                accepted = bool(checks) and all(c["passed"] for c in checks)
+            except Exception as e:  # noqa: BLE001
+                accepted, checks = False, [{"id": "acceptance_error", "what": "acceptance suite ran",
+                                            "passed": False, "detail": f"{type(e).__name__}: {e}"[:300]}]
+            rec.emit("acceptance.result", source="controller", outputs_accepted=accepted,
+                     passed=sum(c["passed"] for c in checks), total=len(checks), checks=checks)
+        if problems:
+            if status == "succeeded":
+                status = "failed"
+            reason = "; ".join(filter(None, [reason] + problems))
         result = {"run_id": run_id, "status": status, "reason": reason, "summary": summary,
-                  "output_manifest": manifest, "outputs_refused": refused_outputs, "files_changed": changed,
-                  "ledger": ledger, "leftovers": leftovers}
+                  "outputs_accepted": accepted, "output_manifest": manifest, "outputs_refused": refused_outputs,
+                  "files_changed": changed, "ledger": ledger, "leftovers": leftovers}
         rec.emit("run.finished", source="controller", **{k: v for k, v in result.items() if k != "ledger"},
                  cost_usd=ledger["cost_usd"], cost_label=COST_LABEL, tokens=ledger["totals"],
                  requests=len(ledger["requests"]), api_errors=ledger["api_errors"],
@@ -350,4 +401,5 @@ def run_node(ctx, node_config, task, files=None, outputs=("*",), model=None, run
     result["diff"] = diff
     result["events"] = rec.events
     result["outputs"] = exported
+    result["acceptance"] = checks
     return result

@@ -45,12 +45,14 @@ def solve(csv_bytes):
     w = csv.DictWriter(out, fieldnames=["ts", "machine", "vibration_mm_s", "spindle_temp_c", "status"])
     w.writeheader()
     w.writerows(norm)
-    svg = b'<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><path d="M0 0L10 10"/></svg>'
+    pts = " ".join(f"{i},{float(r['vibration_mm_s']) * 50:.1f}" for i, r in enumerate(norm) if r["status"] == "ok")
+    svg = (f'<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="400">'
+           f'<polyline fill="none" stroke="black" points="{pts}"/></svg>').encode()
     return {
         "alerts.json": json.dumps({"window": {"start": grid[0], "end": grid[-1]}, "machines": report,
                                    "alerts": alerts}).encode(),
         "normalized.csv": out.getvalue().encode(),
         "vibration.svg": svg,
-        "pipeline.py": b"# reference",
-        "test_pipeline.py": b"# reference",
+        "pipeline.py": b"def main():\n    pass\n",
+        "test_pipeline.py": b"def test_reference():\n    assert True\n",
     }

@@ -1,0 +1,151 @@
+{
+  "run_id": "line3-run2",
+  "status": "succeeded",
+  "outputs_accepted": true,
+  "checks": [
+    {
+      "id": "alerts_json",
+      "what": "alerts.json is valid JSON",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "id": "alert_count",
+      "what": "exactly one sustained shift is reported",
+      "passed": true,
+      "detail": "1 reported"
+    },
+    {
+      "id": "alert_machine",
+      "what": "the shift is on M2 vibration",
+      "passed": true,
+      "detail": "M2 vibration_mm_s"
+    },
+    {
+      "id": "alert_start",
+      "what": "the shift starts at the injected minute",
+      "passed": true,
+      "detail": "reported 2026-09-14T13:11:00Z, injected 2026-09-14T13:11:00Z"
+    },
+    {
+      "id": "no_spike_alert",
+      "what": "the two-minute spike on M1 is not reported",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "id": "counts_M1",
+      "what": "M1: rows, missing and dropped duplicates match",
+      "passed": true,
+      "detail": "got 480/9/11, expected 480/9/11"
+    },
+    {
+      "id": "counts_M2",
+      "what": "M2: rows, missing and dropped duplicates match",
+      "passed": true,
+      "detail": "got 480/16/11, expected 480/16/11"
+    },
+    {
+      "id": "counts_M3",
+      "what": "M3: rows, missing and dropped duplicates match",
+      "passed": true,
+      "detail": "got 480/20/9, expected 480/20/9"
+    },
+    {
+      "id": "normalized_rows",
+      "what": "normalized.csv has one row per machine and minute",
+      "passed": true,
+      "detail": "1440 rows, expected 1440"
+    },
+    {
+      "id": "normalized_missing",
+      "what": "missing minutes are marked missing",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "id": "conflicts_last_wins",
+      "what": "conflicting duplicates keep the last row in file order",
+      "passed": true,
+      "detail": "6 conflicting minutes checked"
+    },
+    {
+      "id": "normalized_sorted",
+      "what": "rows are sorted by machine then ts",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "id": "normalized_unique",
+      "what": "no machine-minute appears twice",
+      "passed": true,
+      "detail": "0 duplicates"
+    },
+    {
+      "id": "normalized_status",
+      "what": "status is only ok or missing",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "id": "missing_rows_blank",
+      "what": "missing rows leave both value columns empty",
+      "passed": true,
+      "detail": "0 missing rows still carry a value"
+    },
+    {
+      "id": "normalized_keys",
+      "what": "exactly one row for every machine and minute of the window",
+      "passed": true,
+      "detail": "0 missing keys, 0 unexpected keys"
+    },
+    {
+      "id": "readings_match_source",
+      "what": "every kept reading equals the last source row for its minute",
+      "passed": true,
+      "detail": "0 rows differ from the source"
+    },
+    {
+      "id": "alert_figures",
+      "what": "baseline and post-shift level match an independent recomputation",
+      "passed": true,
+      "detail": "M2 baseline 1.8545, level 3.4861"
+    },
+    {
+      "id": "svg_valid",
+      "what": "vibration.svg is an SVG document",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "id": "svg_plotted",
+      "what": "vibration.svg actually plots the series (hundreds of coordinates)",
+      "passed": true,
+      "detail": "2950 numeric coordinates"
+    },
+    {
+      "id": "svg_inert",
+      "what": "vibration.svg has no scripts, event handlers or external links",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "id": "pipeline_present",
+      "what": "pipeline.py and test_pipeline.py are non-empty Python with functions",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "id": "rerun_reproduces",
+      "what": "re-running pipeline.py in a fresh sandbox reproduces alerts.json, normalized.csv and vibration.svg exactly",
+      "passed": true,
+      "detail": "exit 0, identical files 3 of 3"
+    },
+    {
+      "id": "own_tests_pass",
+      "what": "the delivered tests pass in the fresh sandbox",
+      "passed": true,
+      "detail": "17 passed in 0.53s"
+    }
+  ]
+}

@@ -115,7 +115,8 @@ class ToolRunner:
         if res.get("killed_leftover_processes"):
             notes.append(f"{res['killed_leftover_processes']} leftover background process(es) killed")
         tail = f"\n[exit code {res.get('exit_code')}]" + ("".join(f"\n[{n}]" for n in notes))
-        return clean(out, 20_000) + tail, bool(res.get("timed_out")) or res.get("exit_code") is None
+        # a non-zero exit is a failed command (recoverable: the model can fix and retry)
+        return clean(out, 20_000) + tail, bool(res.get("timed_out")) or res.get("exit_code") != 0
 
     def _str_replace_based_edit_tool(self, inp):
         cmd, path = inp["command"], inp["path"]

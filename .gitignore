@@ -8,3 +8,5 @@ site/node_modules/
 .wrangler/
 bench/partial-*.json
 site/
+bench-summary.md
+bench-output.txt

@@ -20,6 +20,8 @@ make test RUNTIME=runsc    # same suite under gVisor, if runsc is installed as a
 ```
 
 To run the example task against the real API: `ANTHROPIC_API_KEY=... python examples/line3/run_demo.py`.
+The task is a synthetic workflow example with the detection rule given; it demonstrates code generation
+and controlled execution, not an anomaly-detection product.
 `CODENODE_MODEL` overrides the model (default `claude-sonnet-5`).
 
 ## What is in here
@@ -34,7 +36,8 @@ To run the example task against the real API: `ANTHROPIC_API_KEY=... python exam
 | `codenode/webfetch.py` | Host-side fetch for the optional fetch profile |
 | `codenode/attacks.py` | Scripted tool requests against the real runtime, each with its observed cause |
 | `deploy/k8s/` | Minimal pod-per-run manifests and the kind check run in CI |
-| `runs/` | The recorded run (JSONL, unedited), its exported outputs and acceptance result |
+| `runs/line3-run2*` | The featured run: event log as written by the node, exported outputs, acceptance result |
+| `runs/line3-run1*` | History. Recorded model/tool trace; its final change summary was corrected after recording (API usage and model/tool events unchanged). It fails the strengthened acceptance suite: 7 missing rows kept a temperature. Later sandbox hardening is covered by the separately dated runtime tests |
 | `bench/` | Attack-suite results: local Docker, CI runc, CI gVisor, CI kind |
 
 ## Node contract
@@ -45,8 +48,15 @@ To run the example task against the real API: `ANTHROPIC_API_KEY=... python exam
   `policy_blocked`; callers cannot pass container options.
 - **Progress**: ordered events with `seq`; `events(after_seq)` resumes without duplicates. Controller
   status and sandbox output are separate (`untrusted_output`).
-- **Finish**: one of `succeeded`, `failed`, `cancelled`, `timed_out`, `policy_blocked`; an output
-  manifest (path, size, sha256) of the declared outputs actually exported.
+- **Finish**: one of `succeeded`, `failed`, `cancelled`, `timed_out`, `policy_blocked`, emitted exactly
+  once even when setup, cleanup or output writing fails; an output manifest (path, size, sha256) of the
+  declared outputs actually exported. `succeeded` means **execution completed**. When the workflow gives
+  an acceptance suite, `outputs_accepted` says whether the **outputs passed the workflow's acceptance
+  checks**; only accepted outputs should feed a consequential next node. The example's suite recomputes
+  the result from the source and re-runs the delivered code in a fresh sandbox, never on the controller.
+- **Failures**: a command that exits non-zero is a tool error the model can recover from. A trusted
+  helper that ends abnormally (killed, bad reply, host-side timeout) fails the run closed: the sandbox is
+  destroyed and nothing is exported.
 - **Retry and cancel**: starting an existing run ID returns the existing run; cancel destroys the
   sandbox and publishes nothing.
 - **Tenants**: run IDs are per tenant, so another tenant's run gets the same answers as a missing one,
@@ -61,14 +71,17 @@ To run the example task against the real API: `ANTHROPIC_API_KEY=... python exam
   in-container helpers are root-owned files on the read-only image, run as `/usr/local/bin/python3 -I -S`
   so nothing the agent writes (a `usercustomize.py`, a `.pth`, a fake `python3`) can change a tool result.
 - **Egress proxy (tested)**: the sandbox sits on an internal network whose only route is a per-run
-  CONNECT proxy applying the tenant's host allowlist. It sees host names, not content.
+  CONNECT proxy. The hosts it allows come from the tenant's server-side policy (`egress_hosts`); a node
+  config can only narrow them, and a wider one is refused before anything is provisioned. The proxy
+  sees host names, not content. Relaxing fetch provenance also needs a policy permission.
 - **Fetch (tested with stubs and a local receiver)**: `fetch_url` runs on the controller with a
   connection policy (public addresses only, IPv4 and IPv6, redirects re-checked, connection pinned to
   the checked address) and opens only URLs that appeared in the task or in fetched pages.
 - **gVisor**: `runtime: runsc` runs the same container under gVisor's application kernel, which narrows
   the host kernel interface the sandbox can reach. It is not a VM. CI runs the suite under it
-  (`bench/ci-runsc.json`): 18 of 20 cases hold; under the fork burst and the 3 GB allocation the whole
-  sandbox exits instead of refusing the one process, the run ends `failed` and nothing is left behind.
+  (`bench/ci-runsc.json`): all but two cases hold; under the fork burst and the 3 GB allocation the whole
+  sandbox exits instead of refusing the one process, the node fails closed and nothing is left behind. CI
+  treats those two as known outcomes (`bench/known-runsc.json`) and fails on anything new.
   An earlier gVisor run also caught the file tool following a symlinked directory; the tool now checks
   each path component with lstat before opening and fstat after.
 

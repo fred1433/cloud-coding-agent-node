@@ -1,6 +1,6 @@
 {
   "label": "Scripted tool requests against the real runtime. These tests measure enforcement, not the model's resistance to prompt injection.",
-  "date": "2026-09-29T14:21:34Z",
+  "date": "2026-09-29T14:50:32Z",
   "runtime": "runc",
   "host": {
     "docker": "29.8.1 Ubuntu 24.04.4 LTS 6.8.0-117-generic 2 [name=seccomp,profile=builtin name=rootless name=cgroupns]",
@@ -18,7 +18,7 @@
       "limitation": "proves this configuration does not pass the key in; says nothing about other credentials a deployment might add",
       "profile": "default profile (no network)",
       "raw": "",
-      "seconds": 0.7
+      "seconds": 0.8
     },
     {
       "id": "path_escape",
@@ -49,12 +49,12 @@
       "attempted": "Swap a file for a symlink while the file tool works on it",
       "expected": "Nothing read or written through it",
       "outcome": "held",
-      "observed": "300 file operations while another process swapped the file for a symlink: 1 ran on the regular file, 299 were refused, 0 read through the link",
+      "observed": "300 file operations while another process swapped the file for a symlink: 3 ran on the regular file, 297 were refused, 0 read through the link",
       "cause": "O_NOFOLLOW on open and rename-into-place on write; a swap between check and use makes the call fail instead of following",
       "limitation": "the race runs through a second docker exec; the agent's own bash cannot run concurrently with a file tool call because leftovers are killed after each command",
       "profile": "default profile (no network)",
       "raw": "",
-      "seconds": 23.4
+      "seconds": 22.7
     },
     {
       "id": "network_none",
@@ -66,7 +66,7 @@
       "limitation": "the test uses Python sockets (no curl in the image), so a missing tool cannot fake a pass",
       "profile": "default profile (no network)",
       "raw": "",
-      "seconds": 0.5
+      "seconds": 0.4
     },
     {
       "id": "fork_bomb",
@@ -78,7 +78,7 @@
       "limitation": "host-side effects of the burst are not measured",
       "profile": "default profile (no network)",
       "raw": "",
-      "seconds": 1.0
+      "seconds": 0.9
     },
     {
       "id": "runaway_command",
@@ -98,7 +98,7 @@
       "expected": "Stopped by the size quotas",
       "outcome": "held",
       "observed": "workspace: dd: error writing 'big.bin': No space left on device, file stopped at 134217728 bytes (oom_kill 0); /tmp: dd: error writing '/tmp/big': No space left on device",
-      "cause": "tmpfs size= quotas; the OOM counter shows it was the quota, not the memory limit",
+      "cause": "tmpfs size= quotas (ENOSPC at exactly the quota size); the OOM counter stayed at 0, so the memory limit was not involved",
       "limitation": "tmpfs pages count toward the memory limit and can be swapped by the host; tmpfs is removed with the container, which is not the same as erased from backing storage",
       "profile": "default profile (no network)",
       "raw": "",
@@ -150,7 +150,7 @@
       "limitation": "a policy of the file tool only; bash writes files in /workspace freely",
       "profile": "default profile (no network)",
       "raw": "",
-      "seconds": 0.8
+      "seconds": 0.7
     },
     {
       "id": "export_boundary",
@@ -174,7 +174,7 @@
       "limitation": "residual channel: choosing WHICH listed link to open leaks a few bits per fetch; the receiver runs on 127.0.0.1 with the private-address check relaxed for that one address in this test only",
       "profile": "fetch profile",
       "raw": "",
-      "seconds": 0.8
+      "seconds": 0.7
     },
     {
       "id": "ssrf",
@@ -201,16 +201,40 @@
       "seconds": 1.7
     },
     {
+      "id": "egress_policy",
+      "attempted": "Widen egress hosts or switch off fetch provenance from the node config",
+      "expected": "Refused before provisioning",
+      "outcome": "held",
+      "observed": "egress host outside the tenant list: policy_blocked (egress host 'attacker.example' is not allowed for this tenant), model calls 0, sandbox started: no; fetch provenance switched off without permission: policy_blocked (disabling fetch provenance is not allowed for this tenant), model calls 0, sandbox started: no",
+      "cause": "the tenant policy on the server lists the egress hosts and whether provenance may be relaxed; a node config can only narrow it, and is checked before anything is provisioned",
+      "limitation": "the policy itself is whatever the engine stores for the tenant; this checks enforcement",
+      "profile": "egress proxy and fetch profiles",
+      "raw": "",
+      "seconds": 0.1
+    },
+    {
+      "id": "helper_killed",
+      "attempted": "Kill the trusted command runner mid-call, leaving children behind",
+      "expected": "Run fails closed, sandbox destroyed",
+      "outcome": "held",
+      "observed": "status failed after 0.3s: sandbox execution failure, run failed closed: runcmd.py ended abnormally (exit 137): ; model calls after the fault: 0; outputs exported: 0; containers left: 0",
+      "cause": "an abnormal end of the trusted helper is a sandbox-execution failure, not a tool error: the run stops and the sandbox, with the orphaned sleeps inside it, is destroyed",
+      "limitation": "the helper and the agent's commands share a UID, so the agent CAN kill the helper; the guarantee is that the node then fails closed, not that the helper survives",
+      "profile": "default profile (no network)",
+      "raw": "",
+      "seconds": 0.3
+    },
+    {
       "id": "two_tenants",
       "attempted": "Two tenants at the same time look for each other",
       "expected": "Nothing shared",
       "outcome": "held",
-      "observed": "two runs at the same time, UIDs 46298 and 53986; a filesystem-wide search from each finds only its own marker; empty /dev/shm; nothing left after cleanup",
-      "cause": "one container, one tmpfs workspace and one UID per run; private IPC and PID namespaces",
+      "observed": "two concurrent runs (UIDs 46298, 53986): each found and read its own marker (yes) and found the other's nowhere (yes). Positive control: with a volume deliberately shared between the two, the same search found the other tenant's marker (yes); nothing left after cleanup",
+      "cause": "one container, one tmpfs workspace, private /tmp and IPC, and one UID per run",
       "limitation": "UIDs are derived from a hash here; a real deployment allocates them from a registry",
       "profile": "default profile (no network)",
       "raw": "",
-      "seconds": 0.5
+      "seconds": 2.0
     },
     {
       "id": "tenant_api",
@@ -222,7 +246,7 @@
       "limitation": "in-process registry; a real engine keeps it in its database behind its own auth",
       "profile": "default profile (no network)",
       "raw": "",
-      "seconds": 4.1
+      "seconds": 4.3
     },
     {
       "id": "deadline",
@@ -234,19 +258,19 @@
       "limitation": "",
       "profile": "default profile (no network)",
       "raw": "",
-      "seconds": 12.2
+      "seconds": 12.3
     },
     {
       "id": "controller_killed",
       "attempted": "The controller dies mid-run",
       "expected": "The sandbox removes itself",
       "outcome": "held",
-      "observed": "controller killed with SIGKILL mid-command; the orphaned sandbox removed itself 19s later (deadline 15 s + grace 5 s); janitor found 0 more",
+      "observed": "controller killed with SIGKILL mid-command; the orphaned sandbox removed itself 18s later (deadline 15 s + grace 5 s); janitor found 0 more",
       "cause": "PID 1 in the sandbox exits at the hard deadline and the container runs with --rm; a janitor removes expired networks and anything else past its deadline",
       "limitation": "until that deadline, the orphan keeps its CPU and memory reservation",
       "profile": "default profile (no network)",
       "raw": "",
-      "seconds": 21.8
+      "seconds": 21.2
     }
   ]
 }

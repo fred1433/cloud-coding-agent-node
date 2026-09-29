@@ -19,7 +19,7 @@ jobs:
         with: {name: bench-runc, path: bench/results-runc.json}
 
   docker-gvisor:
-    name: attack suite under gVisor (runsc), results published as they are
+    name: attack suite under gVisor (runsc), informational, only known outcomes allowed
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -34,11 +34,14 @@ jobs:
           sudo systemctl reload docker || sudo systemctl restart docker
           docker info --format '{{json .Runtimes}}'
           runsc --version
-      - name: run the suite under runsc (does not gate; outcomes, FAILED ones included, go to the artifact)
+      - name: run the suite under runsc (informational; FAILED outcomes are kept in the artifact)
         run: |
           make venv image
-          .venv/bin/python -m codenode.bench runsc | tee bench-output.txt || true
-          { echo '### gVisor attack suite'; echo '```'; cat bench-output.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          .venv/bin/python -m codenode.bench runsc | tee bench-output.txt || echo "some cases did not hold; checked below"
+      - name: require a valid artifact and only the known, documented outcomes
+        run: |
+          .venv/bin/python scripts/check_bench.py bench/results-runsc.json bench/known-runsc.json
+          cat bench-summary.md >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         if: always()
         with: {name: bench-runsc, path: bench/results-runsc.json}

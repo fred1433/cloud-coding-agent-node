@@ -1,0 +1,32 @@
+{
+  "window": {
+    "start": "2026-09-14T06:00:00Z",
+    "end": "2026-09-14T13:59:00Z"
+  },
+  "machines": {
+    "M1": {
+      "rows": 480,
+      "missing": 9,
+      "duplicates_dropped": 11
+    },
+    "M2": {
+      "rows": 480,
+      "missing": 16,
+      "duplicates_dropped": 11
+    },
+    "M3": {
+      "rows": 480,
+      "missing": 20,
+      "duplicates_dropped": 9
+    }
+  },
+  "alerts": [
+    {
+      "machine": "M2",
+      "signal": "vibration_mm_s",
+      "start_ts": "2026-09-14T13:11:00Z",
+      "baseline": 1.8545,
+      "level_after": 3.4861
+    }
+  ]
+}

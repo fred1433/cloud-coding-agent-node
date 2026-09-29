@@ -9,7 +9,7 @@ Write a small pipeline, in Python with the standard library only, that implement
    machine and minute, keep the LAST one in file order. A minute with no row, or whose kept row has an empty
    vibration value, is `missing`. Write `normalized.csv` with columns
    `ts,machine,vibration_mm_s,spindle_temp_c,status`, sorted by machine then ts, where `status` is `ok` or
-   `missing` (leave the values empty when missing).
+   `missing`. On a `missing` row, leave BOTH value columns empty.
 2. Detect. For each machine, the baseline is the median vibration of its first 60 valid (non-missing) readings.
    A shift is a run of at least 10 consecutive valid readings (missing minutes are skipped, they do not break the
    run) whose vibration is more than 0.8 mm/s above the baseline. Report each shift once, with `start_ts` = the ts

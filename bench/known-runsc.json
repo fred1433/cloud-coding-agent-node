@@ -1,0 +1,7 @@
+{
+  "runtime": "runsc",
+  "known_failures": {
+    "fork_bomb": "the whole gVisor sandbox exits during the fork burst; the node fails closed",
+    "memory": "the whole gVisor sandbox exits during the 3 GB allocation; the node fails closed"
+  }
+}
