@@ -41,22 +41,43 @@ def split_path(path):
     return parts
 
 
+def _no_link(dfd, name):
+    """lstat before open: refuse a symlink even on a runtime whose O_NOFOLLOW is lax."""
+    st = os.stat(name, dir_fd=dfd, follow_symlinks=False)
+    if stat.S_ISLNK(st.st_mode):
+        raise Refused(f"'{name}' is a symlink; refusing to follow it")
+    return st
+
+
+def _same(fd, st, name):
+    """fstat after open: the object opened must be the one checked (no swap in between)."""
+    f = os.fstat(fd)
+    if (f.st_dev, f.st_ino) != (st.st_dev, st.st_ino):
+        os.close(fd)
+        raise Refused(f"'{name}' changed while it was being opened; refusing")
+
+
 def open_dir(parts, create=False):
     """Return an fd for the directory made of `parts`, never following a symlink."""
     fd = os.open(ROOT, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
         for name in parts:
             try:
-                nfd = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+                st = _no_link(fd, name)
             except FileNotFoundError:
                 if not create:
                     raise
                 os.mkdir(name, 0o755, dir_fd=fd)
+                st = _no_link(fd, name)
+            if not stat.S_ISDIR(st.st_mode):
+                raise Refused(f"'{name}' is not a directory")
+            try:
                 nfd = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
             except OSError as e:
                 if e.errno in (errno.ELOOP, errno.ENOTDIR):
                     raise Refused(f"'{name}' is a symlink or not a directory; refusing to follow it")
                 raise
+            _same(nfd, st, name)
             os.close(fd)
             fd = nfd
         return fd
@@ -70,12 +91,14 @@ def read_file(parts, limit=MAX_READ_BYTES):
         raise Refused("the workspace root is a directory")
     dfd = open_dir(parts[:-1])
     try:
+        st0 = _no_link(dfd, parts[-1])
         try:
             fd = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dfd)
         except OSError as e:
             if e.errno == errno.ELOOP:
                 raise Refused(f"'{'/'.join(parts)}' is a symlink; refusing to follow it")
             raise
+        _same(fd, st0, parts[-1])
         try:
             st = os.fstat(fd)
             if not stat.S_ISREG(st.st_mode):
@@ -106,7 +129,9 @@ def write_file(parts, data):
     try:
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644, dir_fd=dfd)
         try:
-            os.write(fd, data)
+            view = memoryview(data)
+            while view:
+                view = view[os.write(fd, view):]
         finally:
             os.close(fd)
         # rename replaces a symlink at the destination instead of writing through it

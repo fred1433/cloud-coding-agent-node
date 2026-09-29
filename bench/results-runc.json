@@ -1,12 +1,12 @@
 {
   "label": "Scripted tool requests against the real runtime. These tests measure enforcement, not the model's resistance to prompt injection.",
-  "date": "2026-09-29T13:44:10Z",
+  "date": "2026-09-29T14:00:41Z",
   "runtime": "runc",
   "host": {
     "docker": "29.8.1 Ubuntu 24.04.4 LTS 6.8.0-117-generic 2 [name=seccomp,profile=builtin name=rootless name=cgroupns]",
     "controller": "Darwin arm64 Python 3.12.13"
   },
-  "image_digest": "sha256:6108c98105d579ce1d0e1bb01aed7d73d76935fc82bc87833af1e704deb34182",
+  "image_digest": "sha256:b9ca3c8f69b4fbe321cfa9e400fe9b8e60649624d99d0f3f4ff33306248ac1b9",
   "results": [
     {
       "id": "env_secrets",
@@ -25,7 +25,7 @@
       "expected": "Refused; root is read-only",
       "outcome": "held",
       "observed": "file tool refused ../, absolute and normalized paths outside /workspace. bash can read the image's own /etc/passwd (that is inside the sandbox, not the host) and cannot write outside /workspace, /tmp and $HOME",
-      "cause": "file tool: path policy; bash: read-only root filesystem",
+      "cause": "file tool: path policy; bash: read-only root filesystem (the kernel answered: Read-only file system)",
       "limitation": "'outside the workspace' is a file-tool policy; 'outside the sandbox' is the container boundary, which this case does not test against the host kernel",
       "profile": "default profile (no network)",
       "seconds": 0.5
@@ -46,11 +46,11 @@
       "attempted": "Swap a file for a symlink while the file tool works on it",
       "expected": "Nothing read or written through it",
       "outcome": "held",
-      "observed": "300 file operations while another process swapped the file for a symlink: 30 ran on the regular file, 270 were refused, 0 read through the link",
+      "observed": "300 file operations while another process swapped the file for a symlink: 4 ran on the regular file, 296 were refused, 0 read through the link",
       "cause": "O_NOFOLLOW on open and rename-into-place on write; a swap between check and use makes the call fail instead of following",
       "limitation": "the race runs through a second docker exec; the agent's own bash cannot run concurrently with a file tool call because leftovers are killed after each command",
       "profile": "default profile (no network)",
-      "seconds": 22.7
+      "seconds": 23.9
     },
     {
       "id": "network_none",
@@ -72,7 +72,7 @@
       "cause": "cgroup pids.max = 64 (the fork error and the pids.events counter are shown)",
       "limitation": "host-side effects of the burst are not measured",
       "profile": "default profile (no network)",
-      "seconds": 0.8
+      "seconds": 0.9
     },
     {
       "id": "runaway_command",
@@ -83,14 +83,14 @@
       "cause": "the command's process group is killed, then every other process of the tenant user except PID 1; an infinite shell loop spends no tokens, so only a time limit can stop it",
       "limitation": "a process that changes its UID could survive; no-new-privileges and the absence of setuid binaries make that impossible in this image",
       "profile": "default profile (no network)",
-      "seconds": 3.9
+      "seconds": 4.0
     },
     {
       "id": "disk_fill",
       "attempted": "Write 2 GB into the workspace and 512 MB into /tmp",
       "expected": "Stopped by the size quotas",
       "outcome": "held",
-      "observed": "2 GB write stopped at the 128 MB workspace quota with ENOSPC (oom_kill counter still 0); /tmp stopped at its 64 MB quota",
+      "observed": "workspace: dd: error writing 'big.bin': No space left on device, file stopped at 134217728 bytes (oom_kill 0); /tmp: dd: error writing '/tmp/big': No space left on device",
       "cause": "tmpfs size= quotas; the OOM counter shows it was the quota, not the memory limit",
       "limitation": "tmpfs pages count toward the memory limit and can be swapped by the host; tmpfs is removed with the container, which is not the same as erased from backing storage",
       "profile": "default profile (no network)",
@@ -171,7 +171,7 @@
       "cause": "the sandbox sits on an internal network with no gateway; the per-run proxy is its only route and applies the tenant's host allowlist",
       "limitation": "the proxy sees host names, not content (no TLS termination): an allowed host is a possible channel, and domain fronting is not addressed",
       "profile": "egress proxy profile",
-      "seconds": 1.6
+      "seconds": 1.5
     },
     {
       "id": "two_tenants",
@@ -204,7 +204,7 @@
       "cause": "a controller watchdog destroys the sandbox at the deadline, killing the command in flight",
       "limitation": "",
       "profile": "default profile (no network)",
-      "seconds": 12.3
+      "seconds": 12.2
     },
     {
       "id": "controller_killed",
@@ -215,7 +215,7 @@
       "cause": "PID 1 in the sandbox exits at the hard deadline and the container runs with --rm; a janitor removes expired networks and anything else past its deadline",
       "limitation": "until that deadline, the orphan keeps its CPU and memory reservation",
       "profile": "default profile (no network)",
-      "seconds": 21.6
+      "seconds": 21.7
     }
   ]
 }

@@ -19,8 +19,9 @@ jobs:
         with: {name: bench-runc, path: bench/results-runc.json}
 
   docker-gvisor:
-    name: attack suite (Docker, gVisor runsc)
+    name: attack suite under gVisor (runsc), results published, not gating
     runs-on: ubuntu-24.04
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

@@ -108,11 +108,13 @@ def a_path_escape(rt):
     rs = outs(run)
     tool_refused = all(r["is_error"] for r in rs[:3]) and not any("root:x:0:0" in r["untrusted_output"] for r in rs[:3])
     b = rs[3]["untrusted_output"]
-    return dict(held=tool_refused and b.count("Read-only file system") == 2,
+    denied = [l.split(": ")[-1] for l in b.splitlines() if "cannot touch" in l]
+    return dict(held=tool_refused and len(denied) == 2,
                 observed="file tool refused ../, absolute and normalized paths outside /workspace. bash can read the "
                          "image's own /etc/passwd (that is inside the sandbox, not the host) and cannot write "
                          "outside /workspace, /tmp and $HOME",
-                cause="file tool: path policy; bash: read-only root filesystem",
+                cause="file tool: path policy; bash: read-only root filesystem (the kernel answered: "
+                      + ", ".join(sorted(set(denied))) + ")",
                 limitation="'outside the workspace' is a file-tool policy; 'outside the sandbox' is the container "
                            "boundary, which this case does not test against the host kernel")
 
@@ -193,6 +195,12 @@ def a_fork_bomb(rt):
     ], limits={"pids": 64, "command_timeout_s": 15})
     rs = outs(run)
     o = rs[0]["untrusted_output"]
+    if "sandbox helper failed" in o:
+        return dict(held=False, observed="the whole sandbox exited during the fork burst instead of refusing forks; "
+                                         f"the run ended {run['status']}, containers left: {len(run['leftovers']['containers'])}",
+                    cause="not determined: the runtime reported that the sandbox's init process was gone",
+                    limitation="contained (nothing left behind), but the expected behaviour, refused forks and a "
+                               "sandbox that keeps working, was not observed")
     return dict(held="fork failed" in o and "still-alive" in rs[1]["untrusted_output"] and run["leftovers"] == CLEAN,
                 observed=next((l for l in o.splitlines() if "fork failed" in l), "no fork error")[:140]
                 + f"; cgroup pids.max {o.splitlines()[0].strip()}, pids.events "
@@ -229,8 +237,11 @@ def a_disk_fill(rt):
     size = next((l for l in o.splitlines() if l.strip().isdigit()), "?")
     ddw = next((l for l in o.splitlines() if "dd:" in l), "no dd error")
     ddt = next((l for l in rs[1]["untrusted_output"].splitlines() if "dd:" in l), "no dd error")
-    oom = next((l for l in o.splitlines() if l.startswith("oom_kill")), "oom_kill counter not readable")
-    return dict(held="No space left on device" in o and "oom_kill 0" in o and "still-alive" in rs[1]["untrusted_output"],
+    oom = next((l for l in o.splitlines() if l.startswith("oom_kill")),
+               "the memory OOM counter is not exposed in this runtime")
+    oom_ok = "oom_kill 0" in o or "memory.events: No such file" in o
+    return dict(held="No space left on device" in o and "No space left on device" in rs[1]["untrusted_output"]
+                and size == "134217728" and oom_ok and "still-alive" in rs[1]["untrusted_output"],
                 observed=f"workspace: {ddw.strip()}, file stopped at {size} bytes ({oom}); /tmp: {ddt.strip()}",
                 cause="tmpfs size= quotas; the OOM counter shows it was the quota, not the memory limit",
                 limitation="tmpfs pages count toward the memory limit and can be swapped by the host; tmpfs is "
@@ -246,6 +257,12 @@ def a_memory(rt):
     ], limits={"memory_mb": 512})
     rs = outs(run)
     o = rs[0]["untrusted_output"]
+    if "sandbox helper failed" in o:
+        return dict(held=False, observed="the whole sandbox exited during the 3 GB allocation; the run ended "
+                                         f"{run['status']}, containers left: {len(run['leftovers']['containers'])}",
+                    cause="not determined; the memory limit applies to the runtime as a whole here, and its OOM "
+                          "counter is not exposed inside the sandbox",
+                    limitation="contained, but the expected behaviour, only the offending process killed, was not observed")
     ex = re.search(r"exit=(\d+)", o)
     kills = re.findall(r"oom_kill (\d+)", o)
     return dict(held="allocated 3" not in o and "still-alive" in rs[1]["untrusted_output"],
