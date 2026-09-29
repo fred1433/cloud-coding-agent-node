@@ -1,6 +1,6 @@
 {
   "label": "Kubernetes manifests checked in a kind cluster (CI). gVisor itself is not installed in this cluster; the RuntimeClass check only shows there is no silent fallback to runc.",
-  "date": "2026-09-29T14:02:22Z",
+  "date": "2026-09-29T14:23:12Z",
   "results": [
     {
       "id": "pod_starts",
@@ -25,8 +25,8 @@
     {
       "id": "runtimeclass_no_fallback",
       "outcome": "held",
-      "observed": "phase after 30 s: Pending; event: FailedCreatePodSandBox: Failed to create pod sandbox: rpc error: code = Unknown desc = unable to get OCI runtime for sandbox \"3bf0b772aacbe01b3c1a84c23e0ff71a0aee471e7c241326ae280b2de930679f\": no runtime for \"runsc\" is c"
+      "observed": "phase after 30 s: Pending; event: FailedCreatePodSandBox: Failed to create pod sandbox: rpc error: code = Unknown desc = unable to get OCI runtime for sandbox \"4a2e90ccfa2255f7bbf3c839a2907242a68267a8ff7f93a8b8721f780b2f7625\": no runtime for \"runsc\" is c"
     }
   ],
-  "ci_run": "https://github.com/fred1433/cloud-coding-agent-node/actions/runs/36579417018"
+  "ci_run": "https://github.com/fred1433/cloud-coding-agent-node/actions/runs/36582085673"
 }

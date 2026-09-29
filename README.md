@@ -67,7 +67,7 @@ To run the example task against the real API: `ANTHROPIC_API_KEY=... python exam
   the checked address) and opens only URLs that appeared in the task or in fetched pages.
 - **gVisor**: `runtime: runsc` runs the same container under gVisor's application kernel, which narrows
   the host kernel interface the sandbox can reach. It is not a VM. CI runs the suite under it
-  (`bench/ci-runsc.json`): 17 of 19 cases hold; under the fork burst and the 3 GB allocation the whole
+  (`bench/ci-runsc.json`): 18 of 20 cases hold; under the fork burst and the 3 GB allocation the whole
   sandbox exits instead of refusing the one process, the run ends `failed` and nothing is left behind.
   An earlier gVisor run also caught the file tool following a symlinked directory; the tool now checks
   each path component with lstat before opening and fstat after.
