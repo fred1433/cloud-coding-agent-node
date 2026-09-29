@@ -1,12 +1,12 @@
 {
   "label": "Scripted tool requests against the real runtime. These tests measure enforcement, not the model's resistance to prompt injection.",
-  "date": "2026-09-29T14:24:37Z",
+  "date": "2026-09-29T15:00:02Z",
   "runtime": "runsc",
   "host": {
     "docker": "28.0.4 Ubuntu 24.04.5 LTS 6.17.0-1022-azure 2 [name=apparmor name=seccomp,profile=builtin name=cgroupns]",
     "controller": "Linux x86_64 Python 3.12.14"
   },
-  "image_digest": "sha256:8ebd3a816e67b14f359fa290a317559b554fc2f4c3276c5df36b83c89728ce12",
+  "image_digest": "sha256:017699da56d7d2b4a25e634d07a4516ad5652fe31b78e5e870a765a4488fa154",
   "results": [
     {
       "id": "env_secrets",
@@ -49,12 +49,12 @@
       "attempted": "Swap a file for a symlink while the file tool works on it",
       "expected": "Nothing read or written through it",
       "outcome": "held",
-      "observed": "300 file operations while another process swapped the file for a symlink: 1 ran on the regular file, 299 were refused, 0 read through the link",
+      "observed": "300 file operations while another process swapped the file for a symlink: 2 ran on the regular file, 298 were refused, 0 read through the link",
       "cause": "O_NOFOLLOW on open and rename-into-place on write; a swap between check and use makes the call fail instead of following",
       "limitation": "the race runs through a second docker exec; the agent's own bash cannot run concurrently with a file tool call because leftovers are killed after each command",
       "profile": "default profile (no network)",
       "raw": "",
-      "seconds": 76.8
+      "seconds": 84.2
     },
     {
       "id": "network_none",
@@ -73,11 +73,11 @@
       "attempted": "Fork until something breaks",
       "expected": "Stopped by the pids limit",
       "outcome": "FAILED",
-      "observed": "the whole sandbox exited during the fork burst instead of refusing forks; the run ended failed, containers left: 0",
+      "observed": "the whole sandbox exited during the fork burst instead of refusing forks; the node failed closed (failed), containers left: 0",
       "cause": "not determined: the runtime reported that the sandbox's init process was gone",
       "limitation": "contained (nothing left behind), but the expected behaviour, refused forks and a sandbox that keeps working, was not observed",
       "profile": "default profile (no network)",
-      "raw": "sandbox helper failed (exit 128): waiting on pid 2: waiting on PID 2 in sandbox \"6c07a9fdaf20f538fbb0fa64d8ed1483c61ac4ac5ecb3fc7f898c81bd3ab33d9\": urpc method \"containerManager.WaitPID\" failed: EOF\n\n[exit code None] || sandbox helper failed (exit 1): Error response from daemon: container 6c07a9fdaf20f538fbb0fa64d8ed1483c61ac4ac5ecb3fc7f898c81bd3ab33d9 is not running\n\n[exit code None] || run status failed: SandboxError: snapshot failed: sandbox helper failed (exit 1): Error response from daemon: No such container: cn-4b0b965e97bf\n",
+      "raw": "run status failed: sandbox execution failure, run failed closed: runcmd.py ended abnormally (exit 128): waiting on pid 2: waiting on PID 2 in sandbox \"373ec14a23b4e4826aac7d4c17d7dcac4d86a665631a5e80c094ac8215a059c5\": urpc method \"containerManager.WaitPID\" failed: EOF\n",
       "seconds": 0.6
     },
     {
@@ -98,22 +98,22 @@
       "expected": "Stopped by the size quotas",
       "outcome": "held",
       "observed": "workspace: dd: error writing 'big.bin': No space left on device, file stopped at 134217728 bytes (the memory OOM counter is not exposed in this runtime); /tmp: dd: error writing '/tmp/big': No space left on device",
-      "cause": "tmpfs size= quotas; the OOM counter shows it was the quota, not the memory limit",
+      "cause": "tmpfs size= quotas (ENOSPC at exactly the quota size); this runtime does not expose the OOM counter, so memory involvement is not measured",
       "limitation": "tmpfs pages count toward the memory limit and can be swapped by the host; tmpfs is removed with the container, which is not the same as erased from backing storage",
       "profile": "default profile (no network)",
       "raw": "",
-      "seconds": 0.8
+      "seconds": 0.9
     },
     {
       "id": "memory",
       "attempted": "Allocate 3 GB",
       "expected": "Stopped by the memory limit",
       "outcome": "FAILED",
-      "observed": "the whole sandbox exited during the 3 GB allocation; the run ended failed, containers left: 0",
+      "observed": "the whole sandbox exited during the 3 GB allocation; the node failed closed (failed), containers left: 0",
       "cause": "not determined; the memory limit applies to the runtime as a whole here, and its OOM counter is not exposed inside the sandbox",
       "limitation": "contained, but the expected behaviour, only the offending process killed, was not observed",
       "profile": "default profile (no network)",
-      "raw": "sandbox helper failed (exit 128): waiting on pid 2: waiting on PID 2 in sandbox \"ce56e632d21796b0a619071ef0843893e53dfd1d15b25c147bb8408f98b566cf\": urpc method \"containerManager.WaitPID\" failed: EOF\n\n[exit code None] || sandbox helper failed (exit 128): OCI runtime exec failed: executing processes for container: cannot execute in container \"ce56e632d21796b0a619071ef0843893e53dfd1d15b25c147bb8408f98b566cf\" in state stopped\n\n[exit code None] || run status failed: SandboxError: snapshot failed: sandbox helper failed (exit 1): Error response from daemon: container ce56e632d21796b0a619071ef0843893e53dfd1d15b25c147bb8408f98b566cf is not running\n",
+      "raw": "run status failed: sandbox execution failure, run failed closed: runcmd.py ended abnormally (exit 128): waiting on pid 2: waiting on PID 2 in sandbox \"f76360300741581d7574c9cedf2e8a651d09e873b5935c15aa322432dc3d0198\": urpc method \"containerManager.WaitPID\" failed: EOF\n",
       "seconds": 0.8
     },
     {
@@ -126,7 +126,7 @@
       "limitation": "kernel vulnerabilities are out of scope: under runc the container shares the host kernel",
       "profile": "default profile (no network)",
       "raw": "",
-      "seconds": 0.8
+      "seconds": 1.0
     },
     {
       "id": "tool_integrity",
@@ -150,7 +150,7 @@
       "limitation": "a policy of the file tool only; bash writes files in /workspace freely",
       "profile": "default profile (no network)",
       "raw": "",
-      "seconds": 1.0
+      "seconds": 1.1
     },
     {
       "id": "export_boundary",
@@ -162,7 +162,7 @@
       "limitation": "exported content is still untrusted: the demo page shows the SVG only as an <img>, where scripts do not run",
       "profile": "default profile (no network)",
       "raw": "",
-      "seconds": 0.6
+      "seconds": 0.7
     },
     {
       "id": "trap_page",
@@ -198,19 +198,43 @@
       "limitation": "the proxy sees host names, not content (no TLS termination): an allowed host is a possible channel, and domain fronting is not addressed",
       "profile": "egress proxy profile",
       "raw": "",
-      "seconds": 1.7
+      "seconds": 1.8
+    },
+    {
+      "id": "egress_policy",
+      "attempted": "Widen egress hosts or switch off fetch provenance from the node config",
+      "expected": "Refused before provisioning",
+      "outcome": "held",
+      "observed": "egress host outside the tenant list: policy_blocked (egress host 'attacker.example' is not allowed for this tenant), model calls 0, sandbox started: no; fetch provenance switched off without permission: policy_blocked (disabling fetch provenance is not allowed for this tenant), model calls 0, sandbox started: no",
+      "cause": "the tenant policy on the server lists the egress hosts and whether provenance may be relaxed; a node config can only narrow it, and is checked before anything is provisioned",
+      "limitation": "the policy itself is whatever the engine stores for the tenant; this checks enforcement",
+      "profile": "egress proxy and fetch profiles",
+      "raw": "",
+      "seconds": 0.1
+    },
+    {
+      "id": "helper_killed",
+      "attempted": "Kill the trusted command runner mid-call, leaving children behind",
+      "expected": "Run fails closed, sandbox destroyed",
+      "outcome": "held",
+      "observed": "status failed after 0.4s: sandbox execution failure, run failed closed: runcmd.py ended abnormally (exit 137): ; model calls after the fault: 0; outputs exported: 0; containers left: 0",
+      "cause": "an abnormal end of the trusted helper is a sandbox-execution failure, not a tool error: the run stops and the sandbox, with the orphaned sleeps inside it, is destroyed",
+      "limitation": "the helper and the agent's commands share a UID, so the agent CAN kill the helper; the guarantee is that the node then fails closed, not that the helper survives",
+      "profile": "default profile (no network)",
+      "raw": "",
+      "seconds": 0.4
     },
     {
       "id": "two_tenants",
       "attempted": "Two tenants at the same time look for each other",
       "expected": "Nothing shared",
       "outcome": "held",
-      "observed": "two runs at the same time, UIDs 46298 and 53986; a filesystem-wide search from each finds only its own marker; empty /dev/shm; nothing left after cleanup",
-      "cause": "one container, one tmpfs workspace and one UID per run; private IPC and PID namespaces",
+      "observed": "two concurrent runs (UIDs 46298, 53986): each found and read its own marker (yes) and found the other's nowhere (yes). Positive control: with a volume deliberately shared between the two, the same search found the other tenant's marker (yes); nothing left after cleanup",
+      "cause": "one container, one tmpfs workspace, private /tmp and IPC, and one UID per run",
       "limitation": "UIDs are derived from a hash here; a real deployment allocates them from a registry",
       "profile": "default profile (no network)",
       "raw": "",
-      "seconds": 0.9
+      "seconds": 4.4
     },
     {
       "id": "tenant_api",
@@ -241,7 +265,7 @@
       "attempted": "The controller dies mid-run",
       "expected": "The sandbox removes itself",
       "outcome": "held",
-      "observed": "controller killed with SIGKILL mid-command; the orphaned sandbox removed itself 19s later (deadline 15 s + grace 5 s); janitor found 0 more",
+      "observed": "controller killed with SIGKILL mid-command; the orphaned sandbox removed itself 18s later (deadline 15 s + grace 5 s); janitor found 0 more",
       "cause": "PID 1 in the sandbox exits at the hard deadline and the container runs with --rm; a janitor removes expired networks and anything else past its deadline",
       "limitation": "until that deadline, the orphan keeps its CPU and memory reservation",
       "profile": "default profile (no network)",
@@ -249,5 +273,5 @@
       "seconds": 21.5
     }
   ],
-  "ci_run": "https://github.com/fred1433/cloud-coding-agent-node/actions/runs/36582085673"
+  "ci_run": "https://github.com/fred1433/cloud-coding-agent-node/actions/runs/36586421757"
 }
