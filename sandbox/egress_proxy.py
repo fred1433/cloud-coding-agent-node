@@ -87,11 +87,13 @@ def handle(client, addr):
             client.sendall(b"HTTP/1.1 403 Host not allowed\r\n\r\n")
             return
         infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
-        ip = infos[0][4][0]
-        if not public(ip):
-            log(decision="deny", host=host, port=port, ip=ip, reason="resolves to a non-public address")
+        ips = [i[4][0] for i in infos]
+        bad = [a for a in ips if not public(a)]
+        if bad:   # every resolved address must be public, not just the first one
+            log(decision="deny", host=host, port=port, ip=bad[0], reason="resolves to a non-public address")
             client.sendall(b"HTTP/1.1 403 Non-public address\r\n\r\n")
             return
+        ip = ips[0]
         upstream = socket.create_connection((ip, port), timeout=10)
         log(decision="allow", host=host, port=port, ip=ip)
         client.sendall(b"HTTP/1.1 200 Connection established\r\n\r\n")

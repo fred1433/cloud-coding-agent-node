@@ -3,7 +3,7 @@ of two small helpers baked into the image (sandbox/fsops.py, sandbox/runcmd.py).
 
 Nothing secret is ever passed to the container: no -e from the host environment,
 no mounted host directory, no Docker socket. The workspace is a size-capped tmpfs
-owned by a UID derived from the tenant, so two tenants never share a UID or a disk.
+owned by a UID derived from the tenant (see tenant_uid); each run gets its own container and disk.
 """
 import base64
 import fnmatch
@@ -17,12 +17,19 @@ import uuid
 from .text import clean
 
 IMAGE = "codenode-sandbox:dev"
+# The helpers live in the image under /opt/codenode (root-owned, mode 0555, on the read-only root
+# filesystem) and run through an absolute interpreter path in isolated mode: -I ignores PYTHON*
+# variables, the user site directory and the current directory, -S skips site imports. Without it,
+# the agent could plant ~/.local/.../usercustomize.py and rewrite every tool result.
+HELPER_PY = ["/usr/local/bin/python3", "-I", "-S"]
 DOCKER = "docker"
 
 
 def tenant_uid(tenant):
-    """A stable, non-root UID per tenant (20000-59999). A real deployment would
-    allocate these from a registry instead of hashing, to rule out collisions."""
+    """A stable, non-root UID derived from the tenant id by hashing into 20000-59999.
+    Two tenants CAN collide (about even odds past 240 tenants); isolation between runs
+    does not depend on it (separate containers and tmpfs), but a real deployment should
+    allocate UIDs from a registry so that they are unique."""
     h = int(hashlib.sha256(tenant.encode()).hexdigest(), 16)
     return 20000 + h % 40000
 
@@ -85,7 +92,7 @@ class Sandbox:
                      "-e", f"https_proxy={proxy}", "-e", f"http_proxy={proxy}"]
         # PID 1 exits at the hard deadline; with --rm Docker then removes the container
         # even if the controller that started it has died.
-        return args + [self.image, "python3", "/opt/codenode/init.py", str(self.hard_deadline_s)]
+        return args + [self.image, *HELPER_PY, "/opt/codenode/init.py", str(self.hard_deadline_s)]
 
     def start(self):
         if self.network["mode"] == "egress_proxy":
@@ -105,7 +112,7 @@ class Sandbox:
                 "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
                 "--pids-limit", "64", "--memory", "128m", "--user", "65534:65534",
                 "--network", self.net_name, "--network-alias", "egress",
-                self.image, "timeout", str(self.hard_deadline_s), "python3", "/opt/codenode/egress_proxy.py", allow)
+                self.image, "timeout", str(self.hard_deadline_s), *HELPER_PY, "/opt/codenode/egress_proxy.py", allow)
         ip = _docker("inspect", "-f", '{{(index .NetworkSettings.Networks "%s").IPAddress}}' % self.net_name,
                      self.proxy_name).stdout.decode().strip()
         # by address, not by name: gVisor's netstack does not use Docker's embedded DNS
@@ -153,7 +160,7 @@ class Sandbox:
     # ---------------------------------------------------------------- execution
     def _helper(self, script, payload, timeout):
         p = _docker("exec", "-i", "-u", f"{self.uid}:{self.uid}", "-w", "/workspace", self.name,
-                    "python3", f"/opt/codenode/{script}",
+                    *HELPER_PY, f"/opt/codenode/{script}",
                     input=json.dumps(payload).encode(), timeout=timeout, check=False)
         try:
             return json.loads(p.stdout)

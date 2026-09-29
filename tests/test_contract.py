@@ -45,3 +45,31 @@ def test_terminal_states(runtime):
     blocked = run_node(TenantContext("t"), {"runtime": runtime, "limits": {"budget_usd": 9}}, "t",
                        model=ScriptedModel([]))
     assert blocked["status"] == "policy_blocked" and "ceiling" in blocked["reason"]
+
+
+@needs_docker
+def test_inputs_that_are_not_outputs_are_not_reported_as_deleted(runtime):
+    m = ScriptedModel([[bash("echo out > result.txt")]])
+    run = run_node(TenantContext("t"), {"runtime": runtime}, "t", {"input.csv": "a,b\n"}, outputs=["*.txt"], model=m)
+    assert run["files_changed"] == ["result.txt"]
+    assert "input.csv" not in run["diff"] and "/dev/null" in run["diff"]
+
+
+@needs_docker
+def test_run_ids_are_per_tenant(runtime):
+    import time
+    from codenode.service import NodeService, RunNotFound
+    svc = NodeService(model_factory=lambda: ScriptedModel([[bash("true")]]))
+    a, b = TenantContext("a"), TenantContext("b")
+    assert svc.start(b, "shared-id", {"runtime": runtime}, "b's task")["started"]      # B first
+    assert svc.start(a, "shared-id", {"runtime": runtime}, "a's task")["started"]      # A not blocked
+    ra, rb = svc.wait(a, "shared-id", 120), svc.wait(b, "shared-id", 120)
+    assert ra["run_id"] != rb["run_id"]
+    tasks = {t: [e["task"] for e in svc.events(ctx, "shared-id") if e["type"] == "run.started"][0]
+             for t, ctx in (("a", a), ("b", b))}
+    assert tasks == {"a": "a's task", "b": "b's task"}
+    try:
+        svc.events(TenantContext("c"), "shared-id")
+        raise AssertionError("tenant c saw a run")
+    except RunNotFound:
+        pass

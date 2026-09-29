@@ -102,3 +102,10 @@ def test_anthropic_defined_tools_are_declared_without_schema():
     assert {"type": "bash_20250124", "name": "bash"} in t
     assert {"type": "text_editor_20250728", "name": "str_replace_based_edit_tool"} in t
     assert any(x.get("name") == "grep" and "input_schema" in x for x in t)
+
+
+def test_helpers_run_in_an_isolated_interpreter():
+    from codenode.sandbox import HELPER_PY, Sandbox
+    assert HELPER_PY[0] == "/usr/local/bin/python3" and "-I" in HELPER_PY and "-S" in HELPER_PY
+    args = Sandbox("t", {"pids": 64, "memory_mb": 256, "cpus": 1, "workspace_mb": 16}).docker_run_args()
+    assert args[-5:-2] == HELPER_PY and args[-2] == "/opt/codenode/init.py"

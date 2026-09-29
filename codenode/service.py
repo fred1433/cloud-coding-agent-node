@@ -4,9 +4,11 @@
   returns the existing run instead of executing it twice.
 - events() takes the last seq the caller saw and returns only what came after, so a
   reconnecting UI resumes without duplicates or gaps.
-- every call checks the caller's TenantContext: tenant A cannot read, follow, cancel
-  or restart tenant B's run, and cannot even learn that it exists.
+- runs are keyed by (tenant, run_id): each tenant has its own run-id namespace, so
+  tenant B cannot read, follow, cancel or restart tenant A's run, cannot squat an id A
+  will use, and gets exactly the same answers whether or not A has a run with that id.
 """
+import hashlib
 import threading
 
 from .node import Recorder, run_node
@@ -25,23 +27,24 @@ class NodeService:
 
     def _get(self, ctx, run_id):
         with self.lock:
-            r = self.runs.get(run_id)
-        if r is None or r["tenant"] != ctx.tenant:
-            raise RunNotFound(run_id)       # same answer whether it is missing or someone else's
+            r = self.runs.get((ctx.tenant, run_id))
+        if r is None:
+            raise RunNotFound(run_id)
         return r
 
     def start(self, ctx, run_id, node_config, task, files=None, outputs=("*",)):
         with self.lock:
-            existing = self.runs.get(run_id)
+            existing = self.runs.get((ctx.tenant, run_id))
             if existing is not None:
-                if existing["tenant"] != ctx.tenant:
-                    raise RunNotFound(run_id)
                 return {"run_id": run_id, "started": False}
             rec = Recorder()
             cancel = threading.Event()
             entry = {"tenant": ctx.tenant, "recorder": rec, "cancel": cancel, "result": None,
                      "done": threading.Event()}
-            self.runs[run_id] = entry
+            self.runs[(ctx.tenant, run_id)] = entry
+
+        # the sandbox name must be unique across tenants too
+        sandbox_id = hashlib.sha256(f"{ctx.tenant}\0{run_id}".encode()).hexdigest()[:20]
 
         def work():
             kw = {}
@@ -50,7 +53,7 @@ class NodeService:
             if self.sandbox_cls:
                 kw["sandbox_cls"] = self.sandbox_cls
             try:
-                entry["result"] = run_node(ctx, node_config, task, files, outputs=outputs, run_id=run_id,
+                entry["result"] = run_node(ctx, node_config, task, files, outputs=outputs, run_id=sandbox_id,
                                            cancel=cancel, recorder=rec, **kw)
             finally:
                 entry["done"].set()

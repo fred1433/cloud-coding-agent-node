@@ -29,7 +29,7 @@ class AnthropicModel:
         key = os.environ.get(api_key_env)
         if not key:
             raise RuntimeError(f"{api_key_env} is not set on the host")
-        self.client = anthropic.Anthropic(api_key=key, max_retries=2)
+        self.client = anthropic.Anthropic(api_key=key, max_retries=0)   # retries are done and counted by the node
         self.model = model
         self.effort = effort
 

@@ -19,9 +19,8 @@ jobs:
         with: {name: bench-runc, path: bench/results-runc.json}
 
   docker-gvisor:
-    name: attack suite under gVisor (runsc), results published, not gating
+    name: attack suite under gVisor (runsc), results published as they are
     runs-on: ubuntu-24.04
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -35,9 +34,11 @@ jobs:
           sudo systemctl reload docker || sudo systemctl restart docker
           docker info --format '{{json .Runtimes}}'
           runsc --version
-      - run: make test RUNTIME=runsc
-      - run: make bench RUNTIME=runsc
-        if: always()
+      - name: run the suite under runsc (does not gate; outcomes, FAILED ones included, go to the artifact)
+        run: |
+          make venv image
+          .venv/bin/python -m codenode.bench runsc | tee bench-output.txt || true
+          { echo '### gVisor attack suite'; echo '```'; cat bench-output.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         if: always()
         with: {name: bench-runsc, path: bench/results-runsc.json}

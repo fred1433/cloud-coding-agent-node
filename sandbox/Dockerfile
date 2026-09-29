@@ -13,4 +13,4 @@ RUN chmod 0555 /opt/codenode/*.py && mkdir -p /workspace /home/agent
 
 WORKDIR /workspace
 USER 65534:65534
-CMD ["python3", "/opt/codenode/init.py"]
+CMD ["/usr/local/bin/python3", "-I", "-S", "/opt/codenode/init.py"]

@@ -49,13 +49,17 @@ To run the example task against the real API: `ANTHROPIC_API_KEY=... python exam
   manifest (path, size, sha256) of the declared outputs actually exported.
 - **Retry and cancel**: starting an existing run ID returns the existing run; cancel destroys the
   sandbox and publishes nothing.
-- **Tenants**: another tenant's run is indistinguishable from a missing one.
+- **Tenants**: run IDs are per tenant, so another tenant's run gets the same answers as a missing one,
+  and nobody can squat an ID another tenant will use.
 
 ## Execution profiles
 
 - **Default (tested)**: `--network none`, read-only root, all capabilities dropped, `no-new-privileges`,
-  non-root UID per tenant, private IPC, pids, memory and CPU limits, size-capped tmpfs for `/workspace`,
-  `/tmp` (noexec) and `$HOME` (noexec). Dependencies are in the image before tenant data arrives.
+  non-root UID derived from the tenant (hashed, so collisions are possible; allocate from a registry in
+  production), private IPC, pids, memory and CPU limits, size-capped tmpfs for `/workspace`,
+  `/tmp` (noexec) and `$HOME` (noexec). Dependencies are in the image before tenant data arrives. The
+  in-container helpers are root-owned files on the read-only image, run as `/usr/local/bin/python3 -I -S`
+  so nothing the agent writes (a `usercustomize.py`, a `.pth`, a fake `python3`) can change a tool result.
 - **Egress proxy (tested)**: the sandbox sits on an internal network whose only route is a per-run
   CONNECT proxy applying the tenant's host allowlist. It sees host names, not content.
 - **Fetch (tested with stubs and a local receiver)**: `fetch_url` runs on the controller with a

@@ -259,12 +259,22 @@ def run_node(ctx, node_config, task, files=None, outputs=("*",), model=None, run
             rec.emit("model.request", source="controller", step=step, reservation_input_tokens=reserve_in,
                      reservation_usd=reserve, spent_usd=round(ledger["cost_usd"], 6))
             t = time.monotonic()
-            try:
-                resp = model.call(system, tools, messages, L["max_tokens_per_turn"],
-                                  timeout=max(5.0, deadline - time.monotonic()))
-            except Exception as e:  # noqa: BLE001
-                ledger["api_errors"] += 1
-                raise RuntimeError(f"model request failed: {type(e).__name__}: {str(e)[:300]}") from e
+            resp = None
+            for attempt in range(3):     # our own retries, so every failed attempt is in the ledger
+                try:
+                    resp = model.call(system, tools, messages, L["max_tokens_per_turn"],
+                                      timeout=max(5.0, deadline - time.monotonic()))
+                    break
+                except Exception as e:  # noqa: BLE001
+                    ledger["api_errors"] += 1
+                    retryable = getattr(e, "status_code", 500) in (408, 409, 429) or \
+                        getattr(e, "status_code", 500) >= 500
+                    rec.emit("model.error", source="controller", step=step, attempt=attempt + 1,
+                             error=f"{type(e).__name__}: {str(e)[:300]}", retryable=retryable,
+                             note="failed attempts are recorded; errored requests are normally not billed")
+                    if not retryable or attempt == 2 or stop.is_set():
+                        raise RuntimeError(f"model request failed: {type(e).__name__}: {str(e)[:300]}") from e
+                    time.sleep(2 * (attempt + 1))
             cost = prices.cost(cfg["model"], resp.usage)
             ledger["cost_usd"] = round(ledger["cost_usd"] + cost, 6)
             for k in ledger["totals"]:
@@ -310,7 +320,9 @@ def run_node(ctx, node_config, task, files=None, outputs=("*",), model=None, run
             messages.append({"role": "user", "content": results})
         if not stop.is_set():
             exported, refused_outputs = sb.export(list(outputs))
-            changed = sorted(p for p in set(files) | set(exported) if files.get(p) != exported.get(p))
+            # only exported outputs can be described; an input that is not a declared output was not
+            # deleted, it simply does not leave the sandbox
+            changed = sorted(p for p in exported if files.get(p) != exported[p])
             if cfg["network"]["mode"] == "egress_proxy":
                 for entry in sb.egress_log():
                     rec.emit("egress.log", source="controller", **entry)
