@@ -79,7 +79,7 @@ class Sandbox:
         if self.network["mode"] == "none":
             args += ["--network", "none"]
         else:
-            proxy = "http://egress:3128"
+            proxy = getattr(self, "proxy_url", "http://egress:3128")
             args += ["--network", self.net_name,
                      "-e", f"HTTPS_PROXY={proxy}", "-e", f"HTTP_PROXY={proxy}",
                      "-e", f"https_proxy={proxy}", "-e", f"http_proxy={proxy}"]
@@ -106,6 +106,10 @@ class Sandbox:
                 "--pids-limit", "64", "--memory", "128m", "--user", "65534:65534",
                 "--network", self.net_name, "--network-alias", "egress",
                 self.image, "timeout", str(self.hard_deadline_s), "python3", "/opt/codenode/egress_proxy.py", allow)
+        ip = _docker("inspect", "-f", '{{(index .NetworkSettings.Networks "%s").IPAddress}}' % self.net_name,
+                     self.proxy_name).stdout.decode().strip()
+        # by address, not by name: gVisor's netstack does not use Docker's embedded DNS
+        self.proxy_url = f"http://{ip}:3128"
         _docker("network", "connect", "bridge", self.proxy_name)
         # wait until the proxy logs that it listens
         for _ in range(50):

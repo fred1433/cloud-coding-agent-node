@@ -58,9 +58,15 @@ def cfg(runtime, **over):
     return c
 
 
+_RAW = []   # tool outputs of the current case, appended to the record when a case fails
+
+
 def go(runtime, turns, files=None, tenant="attacker", policy=None, task="attack", **over):
     c = cfg(runtime, **over)
     run = run_node(ctx(tenant, **(policy or {})), c, task, files, model=ScriptedModel(turns))
+    _RAW.extend(e["untrusted_output"] for e in run["events"] if e["type"] == "tool.result")
+    if run["status"] != "succeeded":
+        _RAW.append(f"run status {run['status']}: {run.get('reason', '')}")
     return run, c
 
 
@@ -220,9 +226,12 @@ def a_disk_fill(rt):
     ], limits={"workspace_mb": 128, "memory_mb": 768})
     rs = outs(run)
     o = rs[0]["untrusted_output"]
+    size = next((l for l in o.splitlines() if l.strip().isdigit()), "?")
+    ddw = next((l for l in o.splitlines() if "dd:" in l), "no dd error")
+    ddt = next((l for l in rs[1]["untrusted_output"].splitlines() if "dd:" in l), "no dd error")
+    oom = next((l for l in o.splitlines() if l.startswith("oom_kill")), "oom_kill counter not readable")
     return dict(held="No space left on device" in o and "oom_kill 0" in o and "still-alive" in rs[1]["untrusted_output"],
-                observed="2 GB write stopped at the 128 MB workspace quota with ENOSPC (oom_kill counter still 0); "
-                         "/tmp stopped at its 64 MB quota",
+                observed=f"workspace: {ddw.strip()}, file stopped at {size} bytes ({oom}); /tmp: {ddt.strip()}",
                 cause="tmpfs size= quotas; the OOM counter shows it was the quota, not the memory limit",
                 limitation="tmpfs pages count toward the memory limit and can be swapped by the host; tmpfs is "
                            "removed with the container, which is not the same as erased from backing storage")
@@ -616,11 +625,14 @@ def run_all(runtime="runc", only=None):
         if only and aid not in only:
             continue
         t = time.monotonic()
+        _RAW.clear()
         try:
             r = fn(runtime)
         except Exception as e:  # noqa: BLE001 - a crashing case is reported, not hidden
             r = dict(held=False, observed=f"suite error: {type(e).__name__}: {e}", cause="", limitation="")
         outcome = "SKIPPED" if r["held"] is None else ("held" if r["held"] else "FAILED")
+        if outcome == "FAILED" and _RAW:
+            r["observed"] += " | raw tool output: " + " || ".join(x[:400] for x in _RAW)[:2500]
         out.append({"id": aid, "attempted": attempted, "expected": expected, "outcome": outcome,
                     "observed": r["observed"], "cause": r.get("cause", ""), "limitation": r.get("limitation", ""),
                     "profile": PROFILE.get(aid, "default profile (no network)"),

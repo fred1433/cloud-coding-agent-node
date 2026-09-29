@@ -7,3 +7,4 @@ runs/line3-scripted*
 site/node_modules/
 .wrangler/
 bench/partial-*.json
+site/
