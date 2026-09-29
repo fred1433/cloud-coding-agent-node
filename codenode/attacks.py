@@ -649,9 +649,9 @@ def run_all(runtime="runc", only=None):
             r = dict(held=False, observed=f"suite error: {type(e).__name__}: {e}", cause="", limitation="")
         outcome = "SKIPPED" if r["held"] is None else ("held" if r["held"] else "FAILED")
         if outcome == "FAILED" and _RAW:
-            r["observed"] += " | raw tool output: " + " || ".join(x[:400] for x in _RAW)[:2500]
+            r["raw"] = " || ".join(x[:400] for x in _RAW)[:2500]
         out.append({"id": aid, "attempted": attempted, "expected": expected, "outcome": outcome,
                     "observed": r["observed"], "cause": r.get("cause", ""), "limitation": r.get("limitation", ""),
-                    "profile": PROFILE.get(aid, "default profile (no network)"),
+                    "profile": PROFILE.get(aid, "default profile (no network)"), "raw": r.get("raw", ""),
                     "seconds": round(time.monotonic() - t, 1)})
     return out
